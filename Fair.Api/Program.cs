@@ -4,22 +4,17 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
+using Fair.Application.Abstractions;
+using Fair.Infrastructure.Auth;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// -------------------- Services --------------------
-
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-
-// Swagger + JWT Authorize
+builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddSwaggerGen(c =>
 {
-    c.SwaggerDoc("v1", new OpenApiInfo
-    {
-        Title = "Fair.Api",
-        Version = "v1"
-    });
+    c.SwaggerDoc("v1", new OpenApiInfo { Title = "Fair.Api", Version = "v1" });
 
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
@@ -28,7 +23,7 @@ builder.Services.AddSwaggerGen(c =>
         Scheme = "Bearer",
         BearerFormat = "JWT",
         In = ParameterLocation.Header,
-        Description = "Skriv: Bearer {din JWT-token}"
+        Description = "Bearer {din JWT-token}"
     });
 
     c.AddSecurityRequirement(new OpenApiSecurityRequirement
@@ -47,25 +42,18 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-
-
-
-
-// CORS (DEV)
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("dev", policy =>
         policy.AllowAnyOrigin()
               .AllowAnyHeader()
-              .AllowAnyMethod()
-    );
+              .AllowAnyMethod());
 });
 
-// JWT config
-var jwtSection = builder.Configuration.GetSection("Jwt");
-var issuer = jwtSection["Issuer"] ?? "fair-api";
-var audience = jwtSection["Audience"] ?? "fair-client";
-var key = jwtSection["Key"] ?? "DEV_ONLY_super_long_secret_key_change_later_1234567890";
+var jwt = builder.Configuration.GetSection("Jwt");
+var issuer = jwt["Issuer"] ?? "fair-api";
+var audience = jwt["Audience"] ?? "fair-client";
+var key = jwt["Key"] ?? "DEV_ONLY_super_long_secret_key_change_later_1234567890";
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -88,15 +76,11 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
-// -------------------- Middleware pipeline --------------------
-
-// Global exception handling -> ProblemDetails
 app.UseExceptionHandler(errorApp =>
 {
     errorApp.Run(async context =>
     {
-        var exceptionHandler = context.Features.Get<IExceptionHandlerFeature>();
-        var ex = exceptionHandler?.Error;
+        var ex = context.Features.Get<IExceptionHandlerFeature>()?.Error;
 
         var problem = new ProblemDetails
         {
@@ -105,7 +89,7 @@ app.UseExceptionHandler(errorApp =>
             Status = StatusCodes.Status500InternalServerError
         };
 
-        context.Response.StatusCode = problem.Status.Value;
+        context.Response.StatusCode = problem.Status!.Value;
         context.Response.ContentType = "application/problem+json";
         await context.Response.WriteAsJsonAsync(problem);
     });
@@ -114,17 +98,13 @@ app.UseExceptionHandler(errorApp =>
 app.UseHttpsRedirection();
 app.UseCors("dev");
 
-// Swagger
 app.UseSwagger();
-app.UseSwaggerUI(c =>
-{
-    c.SwaggerEndpoint("/swagger/v1/swagger.json", "Fair.Api v1");
-});
+app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Fair.Api v1"));
 
-// Auth
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
 app.Run();
+
 

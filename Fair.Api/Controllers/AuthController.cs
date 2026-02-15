@@ -1,8 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.IdentityModel.Tokens;
-using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using System.Text;
+using Fair.Application.Abstractions;
 
 namespace Fair.Api.Controllers;
 
@@ -10,11 +8,11 @@ namespace Fair.Api.Controllers;
 [Route("api/v1/auth/otp")]
 public class AuthController : ControllerBase
 {
-    private readonly IConfiguration _config;
+    private readonly IJwtTokenService _jwt;
 
-    public AuthController(IConfiguration config)
+    public AuthController(IJwtTokenService jwt)
     {
-        _config = config;
+        _jwt = jwt;
     }
 
     // POST /api/v1/auth/otp/request
@@ -43,27 +41,11 @@ public class AuthController : ControllerBase
         if (request.Code != "123456")
             return Unauthorized(new { error = "invalid_code" });
 
-        var jwt = _config.GetSection("Jwt");
-
-        var claims = new[]
-        {
-            new Claim(JwtRegisteredClaimNames.Sub, "usr_1"),
-            new Claim("phone", request.Phone),
-            new Claim(ClaimTypes.Role, "CUSTOMER"),
-        };
-
-        var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt["Key"]!));
-        var creds = new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256);
-
-        var token = new JwtSecurityToken(
-            issuer: jwt["Issuer"],
-            audience: jwt["Audience"],
-            claims: claims,
-            expires: DateTime.UtcNow.AddHours(1),
-            signingCredentials: creds
+        // ✅ Clean architecture: token skapas via service
+        var accessToken = _jwt.CreateToken(
+            userId: Guid.NewGuid(),
+            role: "CUSTOMER"
         );
-
-        var accessToken = new JwtSecurityTokenHandler().WriteToken(token);
 
         return Ok(new
         {
