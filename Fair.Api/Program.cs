@@ -4,14 +4,16 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
-using Fair.Application.Abstractions;
-using Fair.Infrastructure.Auth;
+using Fair.Infrastructure;
+
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
+
+builder.Services.AddInfrastructure(builder.Configuration);
+
 builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "Fair.Api", Version = "v1" });
