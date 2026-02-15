@@ -4,8 +4,9 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
-using Fair.Infrastructure;
 
+using Fair.Infrastructure;
+using Fair.Application.Trips.CreateTrip;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -13,6 +14,9 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 
 builder.Services.AddInfrastructure(builder.Configuration);
+
+// Registrera handlern (om du vill använda den via DI)
+builder.Services.AddScoped<CreateTripHandler>();
 
 builder.Services.AddSwaggerGen(c =>
 {
