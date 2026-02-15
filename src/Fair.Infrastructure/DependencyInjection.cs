@@ -2,6 +2,8 @@ using Fair.Application.Abstractions;
 using Fair.Infrastructure.Auth;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Fair.Application.Trips;
+using Fair.Infrastructure.Trips;
 
 namespace Fair.Infrastructure;
 
@@ -13,6 +15,7 @@ public static class DependencyInjection
     {
         // Auth/JWT
         services.AddScoped<IJwtTokenService, JwtTokenService>();
+        services.AddSingleton<ITripRepository, InMemoryTripRepository>();
 
         // Här fyller vi på senare: db, messaging, logging, etc.
         return services;
