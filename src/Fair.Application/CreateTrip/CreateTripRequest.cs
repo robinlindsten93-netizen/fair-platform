@@ -8,4 +8,5 @@ public sealed record CreateTripRequest(
     double PickupLng,
     double DropoffLat,
     double DropoffLng,
-    TransportMode Mode);
+    TransportMode Mode,
+    TripQuote Quote);

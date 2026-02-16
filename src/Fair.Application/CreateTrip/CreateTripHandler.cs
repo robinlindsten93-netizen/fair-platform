@@ -15,6 +15,9 @@ public sealed class CreateTripHandler
 
         var trip = Trip.CreateDraft(req.RiderId, pickup, dropoff, req.Mode);
 
+        trip.ApplyQuote(req.Quote);
+        trip.Request();
+
         await _repo.AddAsync(trip, ct);
         return new CreateTripResult(trip.Id);
     }
