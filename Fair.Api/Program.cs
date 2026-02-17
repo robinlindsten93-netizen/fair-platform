@@ -1,16 +1,18 @@
+using Fair.Application.Me;
+using Fair.Application.Trips.AcceptTrip;
+using Fair.Application.Trips.ArriveTrip;
+using Fair.Application.Trips.CompleteTrip;
 using Fair.Application.Trips.CreateTrip;
 using Fair.Application.Trips.RequestTrip;
+using Fair.Application.Trips.StartTrip;
 using Fair.Infrastructure;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using System.IdentityModel.Tokens.Jwt;
 using System.Text;
-using Fair.Application.Trips.AcceptTrip;
-using Fair.Application.Trips.ArriveTrip;
-using Fair.Application.Trips.StartTrip;
-using Fair.Application.Trips.CompleteTrip;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,13 +21,18 @@ builder.Services.AddEndpointsApiExplorer();
 
 builder.Services.AddInfrastructure(builder.Configuration);
 
-// Handlers (use cases)
+// =========================
+// Handlers / Use cases
+// =========================
 builder.Services.AddScoped<CreateTripHandler>();
 builder.Services.AddScoped<RequestTripHandler>();
 builder.Services.AddScoped<AcceptTripHandler>();
 builder.Services.AddScoped<ArriveTripHandler>();
 builder.Services.AddScoped<StartTripHandler>();
 builder.Services.AddScoped<CompleteTripHandler>();
+
+// /me use case
+builder.Services.AddScoped<GetMe>();
 
 builder.Services.AddSwaggerGen(c =>
 {
@@ -65,11 +72,16 @@ builder.Services.AddCors(options =>
               .AllowAnyMethod());
 });
 
+// =========================
 // JWT
+// =========================
 var jwt = builder.Configuration.GetSection("Jwt");
 var issuer = jwt["Issuer"] ?? "fair-api";
 var audience = jwt["Audience"] ?? "fair-client";
 var key = jwt["Key"] ?? "DEV_ONLY_super_long_secret_key_change_later_1234567890";
+
+// Senior: säkerställ att "sub" inte mappas bort på oväntat sätt
+JwtSecurityTokenHandler.DefaultInboundClaimTypeMap.Clear();
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -84,7 +96,10 @@ builder.Services
             ValidIssuer = issuer,
             ValidAudience = audience,
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key)),
-            ClockSkew = TimeSpan.FromSeconds(30)
+            ClockSkew = TimeSpan.FromSeconds(30),
+
+            // Senior: mappar sub => NameIdentifier så GetMe kan läsa stabilt
+            NameClaimType = JwtRegisteredClaimNames.Sub
         };
     });
 
@@ -92,7 +107,9 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
+// =========================
 // Errors -> ProblemDetails
+// =========================
 app.UseExceptionHandler(errorApp =>
 {
     errorApp.Run(async context =>

@@ -1,31 +1,28 @@
+using Fair.Application.Me;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using System.Security.Claims;
 
 namespace Fair.Api.Controllers;
 
 [ApiController]
 [Route("api/v1/me")]
 [Authorize]
-public class MeController : ControllerBase
+public sealed class MeController : ControllerBase
 {
-    [HttpGet]
-    public IActionResult Get()
-    {
-        var roles = User.Claims
-            .Where(c => c.Type == ClaimTypes.Role)
-            .Select(c => c.Value)
-            .ToArray();
+    private readonly GetMe _getMe;
 
-        return Ok(new
-        {
-            user = new
-            {
-                id = User.FindFirst("sub")?.Value,
-                phone = User.FindFirst("phone")?.Value
-            },
-            roles = roles,
-            fleets = Array.Empty<object>()
-        });
+    public MeController(GetMe getMe)
+    {
+        _getMe = getMe;
+    }
+
+    [HttpGet]
+    [ProducesResponseType(typeof(MeDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<MeDto>> Get(CancellationToken ct)
+    {
+        var dto = await _getMe.Handle(User, ct);
+        return Ok(dto);
     }
 }
+

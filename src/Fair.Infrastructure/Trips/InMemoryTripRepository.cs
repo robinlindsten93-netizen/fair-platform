@@ -24,26 +24,33 @@ public sealed class InMemoryTripRepository : ITripRepository
 
     public Task UpdateAsync(Trip trip, CancellationToken ct = default)
     {
-        // bump version
-        trip.IncrementVersion();
+        // ⚠️ Denna metod ska användas sparsamt.
+        // Den skriver över utan concurrency-skydd (legacy/backoffice-case).
 
+        trip.IncrementVersion();
         _store[trip.Id] = trip;
+
         return Task.CompletedTask;
     }
 
     public Task<bool> UpdateAsync(Trip trip, int expectedVersion, CancellationToken ct = default)
     {
-        if (!_store.TryGetValue(trip.Id, out var existing))
-            return Task.FromResult(false);
+        while (true)
+        {
+            if (!_store.TryGetValue(trip.Id, out var existing))
+                return Task.FromResult(false);
 
-        if (existing.Version != expectedVersion)
-            return Task.FromResult(false);
+            if (existing.Version != expectedVersion)
+                return Task.FromResult(false);
 
-        // bump version
-        trip.IncrementVersion();
+            // bump version på den inkommande modellen
+            trip.IncrementVersion();
 
-        _store[trip.Id] = trip;
-        return Task.FromResult(true);
+            // CAS-liknande beteende
+            if (_store.TryUpdate(trip.Id, trip, existing))
+                return Task.FromResult(true);
+
+            // någon hann emellan — retry loop
+        }
     }
 }
-
