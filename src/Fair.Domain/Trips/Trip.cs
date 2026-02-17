@@ -18,7 +18,16 @@ public sealed class Trip
     public DateTimeOffset CreatedAtUtc { get; }
     public DateTimeOffset UpdatedAtUtc { get; private set; }
 
-    private Trip(Guid id, Guid riderId, Location pickup, Location dropoff, TransportMode mode, DateTimeOffset nowUtc)
+    // 🔒 Optimistic concurrency version
+    public int Version { get; private set; }
+
+    private Trip(
+        Guid id,
+        Guid riderId,
+        Location pickup,
+        Location dropoff,
+        TransportMode mode,
+        DateTimeOffset nowUtc)
     {
         Id = id;
         RiderId = riderId;
@@ -29,11 +38,19 @@ public sealed class Trip
         Status = TripStatus.Draft;
         CreatedAtUtc = nowUtc;
         UpdatedAtUtc = nowUtc;
+
+        Version = 0; // viktigt
     }
 
-    public static Trip CreateDraft(Guid riderId, Location pickup, Location dropoff, TransportMode mode, DateTimeOffset? nowUtc = null)
+    public static Trip CreateDraft(
+        Guid riderId,
+        Location pickup,
+        Location dropoff,
+        TransportMode mode,
+        DateTimeOffset? nowUtc = null)
     {
-        if (riderId == Guid.Empty) throw new ArgumentException("RiderId is required.", nameof(riderId));
+        if (riderId == Guid.Empty)
+            throw new ArgumentException("RiderId is required.", nameof(riderId));
 
         var now = nowUtc ?? DateTimeOffset.UtcNow;
         return new Trip(Guid.NewGuid(), riderId, pickup, dropoff, mode, now);
@@ -151,12 +168,25 @@ public sealed class Trip
 
     private void EnsureNotFinal()
     {
-        if (Status is TripStatus.Completed or TripStatus.CanceledByRider or TripStatus.CanceledByDriver)
+        if (Status is TripStatus.Completed
+            or TripStatus.CanceledByRider
+            or TripStatus.CanceledByDriver)
+        {
             throw new InvalidOperationException($"Trip is final ({Status}). No further changes allowed.");
+        }
     }
 
     private void Touch(DateTimeOffset? nowUtc = null)
     {
         UpdatedAtUtc = nowUtc ?? DateTimeOffset.UtcNow;
+    }
+
+    // 🔒 Only repository should bump version
+    internal void IncrementVersion()
+    {
+        checked
+        {
+            Version++;
+        }
     }
 }

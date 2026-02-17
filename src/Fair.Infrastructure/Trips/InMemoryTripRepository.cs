@@ -24,9 +24,26 @@ public sealed class InMemoryTripRepository : ITripRepository
 
     public Task UpdateAsync(Trip trip, CancellationToken ct = default)
     {
-        // In-memory: trip är referens-objekt så detta är i praktiken en no-op.
-        // Men vi behåller metoden för att matcha framtida DB-implementation.
+        // bump version
+        trip.IncrementVersion();
+
         _store[trip.Id] = trip;
         return Task.CompletedTask;
     }
+
+    public Task<bool> UpdateAsync(Trip trip, int expectedVersion, CancellationToken ct = default)
+    {
+        if (!_store.TryGetValue(trip.Id, out var existing))
+            return Task.FromResult(false);
+
+        if (existing.Version != expectedVersion)
+            return Task.FromResult(false);
+
+        // bump version
+        trip.IncrementVersion();
+
+        _store[trip.Id] = trip;
+        return Task.FromResult(true);
+    }
 }
+

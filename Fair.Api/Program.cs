@@ -1,12 +1,16 @@
+using Fair.Application.Trips.CreateTrip;
+using Fair.Application.Trips.RequestTrip;
+using Fair.Infrastructure;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
-
-using Fair.Infrastructure;
-using Fair.Application.Trips.CreateTrip;
+using Fair.Application.Trips.AcceptTrip;
+using Fair.Application.Trips.ArriveTrip;
+using Fair.Application.Trips.StartTrip;
+using Fair.Application.Trips.CompleteTrip;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -15,8 +19,13 @@ builder.Services.AddEndpointsApiExplorer();
 
 builder.Services.AddInfrastructure(builder.Configuration);
 
-// Registrera handlern (om du vill använda den via DI)
+// Handlers (use cases)
 builder.Services.AddScoped<CreateTripHandler>();
+builder.Services.AddScoped<RequestTripHandler>();
+builder.Services.AddScoped<AcceptTripHandler>();
+builder.Services.AddScoped<ArriveTripHandler>();
+builder.Services.AddScoped<StartTripHandler>();
+builder.Services.AddScoped<CompleteTripHandler>();
 
 builder.Services.AddSwaggerGen(c =>
 {
@@ -56,6 +65,7 @@ builder.Services.AddCors(options =>
               .AllowAnyMethod());
 });
 
+// JWT
 var jwt = builder.Configuration.GetSection("Jwt");
 var issuer = jwt["Issuer"] ?? "fair-api";
 var audience = jwt["Audience"] ?? "fair-client";
@@ -82,6 +92,7 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
+// Errors -> ProblemDetails
 app.UseExceptionHandler(errorApp =>
 {
     errorApp.Run(async context =>

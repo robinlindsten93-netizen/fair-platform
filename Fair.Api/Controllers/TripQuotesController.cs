@@ -6,32 +6,47 @@ using Microsoft.AspNetCore.Mvc;
 namespace Fair.Api.Controllers;
 
 [ApiController]
-[Route("api/v1/trips")]
+[Route("api/v1/trips/quotes")]
 public sealed class TripQuotesController : ControllerBase
 {
-    [HttpPost("quote")]
+    [HttpPost]
     [Authorize]
     public IActionResult Quote(
         [FromBody] QuoteBody body,
         [FromServices] ITripQuoteService quoteService,
         [FromServices] IQuoteTokenService tokenService)
     {
-        var pickup = Location.Create(body.PickupLat, body.PickupLng);
-        var dropoff = Location.Create(body.DropoffLat, body.DropoffLng);
+        // Basic validation
+        if (body.Mode < 0) return BadRequest(new { error = "invalid_mode" });
 
-        var quote = quoteService.CreateQuote(pickup, dropoff, body.Mode, DateTimeOffset.UtcNow);
+        Location pickup;
+        Location dropoff;
+
+        try
+        {
+            pickup = Location.Create(body.PickupLat, body.PickupLng);
+            dropoff = Location.Create(body.DropoffLat, body.DropoffLng);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = "invalid_location", detail = ex.Message });
+        }
+
+        if (pickup.Latitude == dropoff.Latitude && pickup.Longitude == dropoff.Longitude)
+            return BadRequest(new { error = "pickup_equals_dropoff" });
+
+        var nowUtc = DateTimeOffset.UtcNow;
+
+        var quote = quoteService.CreateQuote(pickup, dropoff, body.Mode, nowUtc);
         var quoteToken = tokenService.CreateToken(quote);
 
         return Ok(new
         {
-            quote = new
-            {
-                estimatedDistanceMeters = quote.EstimatedDistanceMeters,
-                estimatedDurationSeconds = quote.EstimatedDurationSeconds,
-                price = new { amount = quote.Price.Amount, currency = quote.Price.Currency },
-                expiresAtUtc = quote.ExpiresAtUtc,
-                surgeMultiplier = quote.SurgeMultiplier
-            },
+            estimatedDistanceMeters = quote.EstimatedDistanceMeters,
+            estimatedDurationSeconds = quote.EstimatedDurationSeconds,
+            price = new { amount = quote.Price.Amount, currency = quote.Price.Currency },
+            expiresAtUtc = quote.ExpiresAtUtc,
+            surgeMultiplier = quote.SurgeMultiplier,
             quoteToken
         });
     }
@@ -43,3 +58,4 @@ public sealed class TripQuotesController : ControllerBase
         double DropoffLng,
         TransportMode Mode);
 }
+

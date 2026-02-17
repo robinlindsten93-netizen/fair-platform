@@ -30,8 +30,8 @@ public static class DependencyInjection
         // =========================
 
         // 🔴 VIKTIG — binder QuoteTokenOptions från appsettings
-        services.Configure<QuoteTokenOptions>(
-            configuration.GetSection("QuoteToken"));
+        services.Configure<QuoteTokenOptions>(configuration.GetSection("QuoteToken"));
+
 
         services.AddSingleton<ITripQuoteService, TripQuoteService>();
         services.AddSingleton<IQuoteTokenService, HmacQuoteTokenService>();
