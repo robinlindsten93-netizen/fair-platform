@@ -24,5 +24,10 @@ public sealed class MeController : ControllerBase
         var dto = await _getMe.Handle(User, ct);
         return Ok(dto);
     }
+
+    // TEMP: policy smoke test (ta bort när du verifierat)
+    [HttpGet("driver-check")]
+    [Authorize(Policy = "Driver")]
+    public IActionResult DriverCheck() => Ok(new { ok = true });
 }
 
