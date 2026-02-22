@@ -14,11 +14,10 @@ public sealed class CreateDispatchOffers
     public async Task Handle(Guid tripId, int tripVersion, CancellationToken ct)
     {
         var now = DateTimeOffset.UtcNow;
-        var expires = now.AddSeconds(30); // v1: 30s offer TTL
+        var expires = now.AddMinutes(10); // längre TTL så det blir stabilt i Swagger
 
         var onlineDrivers = await _drivers.GetOnlineDriverIdsAsync(ct);
 
-        // v1 matching: broadcast till max 10 online drivers
         var selected = onlineDrivers.Take(10).ToArray();
 
         var offers = selected.Select(driverId => new DispatchOfferDto(

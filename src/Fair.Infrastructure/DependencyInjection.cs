@@ -1,9 +1,11 @@
 using Fair.Application.Abstractions;
 using Fair.Application.Auth;
+using Fair.Application.Dispatch;
 using Fair.Application.Drivers;
 using Fair.Application.Trips;
 using Fair.Application.Trips.Quoting;
 using Fair.Infrastructure.Auth;
+using Fair.Infrastructure.Dispatch;
 using Fair.Infrastructure.Drivers;
 using Fair.Infrastructure.Trips;
 using Fair.Infrastructure.Trips.Quoting;
@@ -22,16 +24,37 @@ public static class DependencyInjection
         services.AddScoped<IJwtTokenService, JwtTokenService>();
 
         // =========================
-        // AuthZ / Roles (för /me + policies)
+        // AuthZ / Roles (SINGLETON SHARED)
         // =========================
         services.AddSingleton<InMemoryRoleAssignmentRepository>();
-        services.AddSingleton<IRoleAssignmentRepository>(sp => sp.GetRequiredService<InMemoryRoleAssignmentRepository>());
-        services.AddSingleton<IRoleAssignmentWriter>(sp => sp.GetRequiredService<InMemoryRoleAssignmentRepository>());
+
+        services.AddSingleton<IRoleAssignmentRepository>(sp =>
+            sp.GetRequiredService<InMemoryRoleAssignmentRepository>());
+
+        services.AddSingleton<IRoleAssignmentWriter>(sp =>
+            sp.GetRequiredService<InMemoryRoleAssignmentRepository>());
 
         // =========================
-        // Drivers (availability foundation)
+        // Drivers (CRITICAL SINGLETON SHARING)
         // =========================
-        services.AddSingleton<IDriverProfileRepository, InMemoryDriverProfileRepository>();
+        services.AddSingleton<InMemoryDriverProfileRepository>();
+
+        services.AddSingleton<IDriverProfileRepository>(sp =>
+            sp.GetRequiredService<InMemoryDriverProfileRepository>());
+
+        services.AddSingleton<IDriverAvailabilityQuery>(sp =>
+            sp.GetRequiredService<InMemoryDriverProfileRepository>());
+
+        // =========================
+        // Dispatch (offers + assignments)
+        // =========================
+        services.AddSingleton<IDispatchOfferRepository, InMemoryDispatchOfferRepository>();
+        services.AddSingleton<IDriverAssignmentRepository, InMemoryDriverAssignmentRepository>();
+
+        // Dispatch use cases
+        services.AddScoped<CreateDispatchOffers>();
+        services.AddScoped<GetMyOffers>();
+        services.AddScoped<AcceptDispatchOffer>();
 
         // =========================
         // Trips
@@ -48,4 +71,3 @@ public static class DependencyInjection
         return services;
     }
 }
-

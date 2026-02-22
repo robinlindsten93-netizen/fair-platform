@@ -10,10 +10,13 @@ public sealed class GetMyOffers
 
     public Task<IReadOnlyList<DispatchOfferDto>> Handle(ClaimsPrincipal user, CancellationToken ct)
     {
-        var driverId =
-            user.FindFirst(ClaimTypes.NameIdentifier)?.Value ??
+        var sub =
             user.FindFirst("sub")?.Value ??
+            user.FindFirst(ClaimTypes.NameIdentifier)?.Value ??
             throw new InvalidOperationException("Missing user id claim (sub/nameidentifier).");
+
+        if (!Guid.TryParse(sub, out var driverId) || driverId == Guid.Empty)
+            throw new InvalidOperationException("Invalid user id claim (expected Guid).");
 
         var now = DateTimeOffset.UtcNow;
         return _offers.GetPendingOffersForDriverAsync(driverId, now, ct);

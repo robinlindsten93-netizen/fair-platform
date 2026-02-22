@@ -1,5 +1,3 @@
-using Fair.Domain.Trips;
-
 namespace Fair.Application.Trips.CreateTrip;
 
 public sealed record CreateTripRequest(
@@ -8,5 +6,6 @@ public sealed record CreateTripRequest(
     double PickupLng,
     double DropoffLat,
     double DropoffLng,
-    TransportMode Mode,
-    TripQuote Quote);
+    int Mode,
+    string QuoteToken
+);

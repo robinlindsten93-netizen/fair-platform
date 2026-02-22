@@ -1,4 +1,5 @@
 using Fair.Api.AuthZ;
+using Fair.Application.Dispatch;
 using Fair.Application.Drivers;
 using Fair.Application.Me;
 using Fair.Application.Trips.AcceptTrip;
@@ -35,6 +36,11 @@ builder.Services.AddScoped<AcceptTripHandler>();
 builder.Services.AddScoped<ArriveTripHandler>();
 builder.Services.AddScoped<StartTripHandler>();
 builder.Services.AddScoped<CompleteTripHandler>();
+
+// 🔥 DISPATCH
+builder.Services.AddScoped<GetMyOffers>();
+builder.Services.AddScoped<AcceptDispatchOffer>();
+builder.Services.AddScoped<CreateDispatchOffers>();
 
 // Identity
 builder.Services.AddScoped<GetMe>();

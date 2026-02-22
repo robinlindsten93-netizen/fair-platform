@@ -8,7 +8,7 @@ public sealed class InMemoryDispatchOfferRepository : IDispatchOfferRepository
     private sealed record Offer(
         Guid OfferId,
         Guid TripId,
-        string DriverId,
+        Guid DriverId,
         int TripVersion,
         DateTimeOffset CreatedAtUtc,
         DateTimeOffset ExpiresAtUtc,
@@ -17,23 +17,33 @@ public sealed class InMemoryDispatchOfferRepository : IDispatchOfferRepository
 
     private readonly ConcurrentDictionary<Guid, Offer> _store = new();
 
+    // Per-trip lock för att garantera single-winner accept (undviker race mellan offers)
+    private readonly ConcurrentDictionary<Guid, object> _tripLocks = new();
+
     public Task AddManyAsync(IEnumerable<DispatchOfferDto> offers, CancellationToken ct)
     {
         foreach (var o in offers)
         {
             _store.TryAdd(o.OfferId, new Offer(
-                o.OfferId, o.TripId, o.DriverId, o.TripVersion, o.CreatedAtUtc, o.ExpiresAtUtc, o.Status
+                o.OfferId,
+                o.TripId,
+                o.DriverId,
+                o.TripVersion,
+                o.CreatedAtUtc,
+                o.ExpiresAtUtc,
+                o.Status
             ));
         }
+
         return Task.CompletedTask;
     }
 
-    public Task<IReadOnlyList<DispatchOfferDto>> GetPendingOffersForDriverAsync(string driverId, DateTimeOffset nowUtc, CancellationToken ct)
+    public Task<IReadOnlyList<DispatchOfferDto>> GetPendingOffersForDriverAsync(Guid driverId, DateTimeOffset nowUtc, CancellationToken ct)
     {
         ExpireInternal(nowUtc);
 
         var list = _store.Values
-            .Where(o => o.DriverId == driverId && o.Status == "PENDING")
+            .Where(o => o.DriverId == driverId && o.Status == "PENDING" && o.ExpiresAtUtc > nowUtc)
             .OrderBy(o => o.CreatedAtUtc)
             .Select(ToDto)
             .ToList()
@@ -50,13 +60,21 @@ public sealed class InMemoryDispatchOfferRepository : IDispatchOfferRepository
         return Task.FromResult<DispatchOfferDto?>(null);
     }
 
-    public Task<bool> TryAcceptAsync(Guid offerId, string driverId, DateTimeOffset nowUtc, CancellationToken ct)
+    // Atomic accept: returns false if already accepted/expired/not found
+    public Task<bool> TryAcceptAsync(Guid offerId, Guid driverId, DateTimeOffset nowUtc, CancellationToken ct)
     {
         ExpireInternal(nowUtc);
 
-        while (true)
+        if (!_store.TryGetValue(offerId, out var existing))
+            return Task.FromResult(false);
+
+        // Single-winner per trip
+        var gate = _tripLocks.GetOrAdd(existing.TripId, _ => new object());
+
+        lock (gate)
         {
-            if (!_store.TryGetValue(offerId, out var existing))
+            // re-read under lock
+            if (!_store.TryGetValue(offerId, out existing))
                 return Task.FromResult(false);
 
             if (existing.DriverId != driverId)
@@ -68,10 +86,13 @@ public sealed class InMemoryDispatchOfferRepository : IDispatchOfferRepository
             if (existing.ExpiresAtUtc <= nowUtc)
                 return Task.FromResult(false);
 
-            var updated = existing with { Status = "ACCEPTED" };
+            // Förhindra att en annan offer redan accepterats för samma trip
+            var tripAlreadyTaken = _store.Values.Any(o => o.TripId == existing.TripId && o.Status == "ACCEPTED");
+            if (tripAlreadyTaken)
+                return Task.FromResult(false);
 
-            if (_store.TryUpdate(offerId, updated, existing))
-                return Task.FromResult(true);
+            _store[offerId] = existing with { Status = "ACCEPTED" };
+            return Task.FromResult(true);
         }
     }
 
@@ -94,6 +115,12 @@ public sealed class InMemoryDispatchOfferRepository : IDispatchOfferRepository
     }
 
     private static DispatchOfferDto ToDto(Offer o) => new(
-        o.OfferId, o.TripId, o.DriverId, o.TripVersion, o.CreatedAtUtc, o.ExpiresAtUtc, o.Status
+        o.OfferId,
+        o.TripId,
+        o.DriverId,
+        o.TripVersion,
+        o.CreatedAtUtc,
+        o.ExpiresAtUtc,
+        o.Status
     );
 }

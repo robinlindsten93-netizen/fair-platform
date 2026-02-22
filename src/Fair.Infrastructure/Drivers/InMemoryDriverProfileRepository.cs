@@ -10,13 +10,21 @@ public sealed class InMemoryDriverProfileRepository :
 {
     private sealed record DriverProfile(bool IsOnline, DateTimeOffset LastSeenUtc);
 
+    // KEY = userId (sub från JWT)
     private readonly ConcurrentDictionary<string, DriverProfile> _store = new();
 
     public Task<DriverMeDto> GetAsync(string userId, CancellationToken ct)
     {
         var now = DateTimeOffset.UtcNow;
-        var profile = _store.GetOrAdd(userId, _ => new DriverProfile(false, now));
-        return Task.FromResult(new DriverMeDto(userId, profile.IsOnline, profile.LastSeenUtc));
+
+        var profile = _store.GetOrAdd(
+            userId,
+            _ => new DriverProfile(false, now));
+
+        return Task.FromResult(new DriverMeDto(
+            userId,
+            profile.IsOnline,
+            profile.LastSeenUtc));
     }
 
     public Task<DriverMeDto> SetAvailabilityAsync(string userId, bool isOnline, CancellationToken ct)
@@ -30,21 +38,36 @@ public sealed class InMemoryDriverProfileRepository :
             {
                 IsOnline = isOnline,
                 LastSeenUtc = now
-            }
-        );
+            });
 
-        return GetAsync(userId, ct);
+        var updated = _store[userId];
+
+        return Task.FromResult(new DriverMeDto(
+            userId,
+            updated.IsOnline,
+            updated.LastSeenUtc));
     }
 
-    // 🔥 DISPATCH: lista online drivers
-    public Task<IReadOnlyList<string>> GetOnlineDriverIdsAsync(CancellationToken ct)
+    // 🚨 KRITISK för dispatch
+    public Task<IReadOnlyList<Guid>> GetOnlineDriverIdsAsync(CancellationToken ct)
     {
-        var online = _store
+        // snapshot för thread-safety + debugging
+        var snapshot = _store.ToArray();
+
+        var online = snapshot
             .Where(kv => kv.Value.IsOnline)
-            .Select(kv => kv.Key)
+            .Select(kv =>
+            {
+                if (Guid.TryParse(kv.Key, out var g))
+                    return (Guid?)g;
+
+                return null;
+            })
+            .Where(g => g.HasValue)
+            .Select(g => g!.Value)
             .ToList()
             .AsReadOnly();
 
-        return Task.FromResult<IReadOnlyList<string>>(online);
+        return Task.FromResult<IReadOnlyList<Guid>>(online);
     }
 }

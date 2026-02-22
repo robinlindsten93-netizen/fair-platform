@@ -1,83 +1,74 @@
 using Fair.Application.Trips;
-using Fair.Application.Trips.CreateTrip;
-using Fair.Application.Trips.Quoting;
-using Fair.Application.Trips.RequestTrip;
 using Fair.Application.Trips.AcceptTrip;
 using Fair.Application.Trips.ArriveTrip;
-using Fair.Application.Trips.StartTrip;
 using Fair.Application.Trips.CompleteTrip;
-using Fair.Domain.Trips;
+using Fair.Application.Trips.CreateTrip;
+using Fair.Application.Trips.RequestTrip;
+using Fair.Application.Trips.StartTrip;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 
 namespace Fair.Api.Controllers;
 
 [ApiController]
 [Route("api/v1/trips")]
+[Authorize]
 public sealed class TripsController : ControllerBase
 {
-    private readonly CreateTripHandler _create;
-
-    public TripsController(CreateTripHandler create)
-    {
-        _create = create;
-    }
-
     // =========================
-    // BODY RECORDS
-    // =========================
-
-    public sealed record CreateTripBody(
-        double PickupLat,
-        double PickupLng,
-        double DropoffLat,
-        double DropoffLng,
-        TransportMode Mode,
-        string QuoteToken);
-
-    public sealed record RequestTripBody(string QuoteToken);
-
-    public sealed record AcceptTripBody(Guid DriverId, string VehicleId);
-
-    // =========================
-    // CREATE TRIP
+    // CREATE TRIP (Draft -> Quoted)
     // =========================
     [HttpPost]
-    [Authorize]
+    [Authorize(Policy = "Rider")]
+    [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Create(
         [FromBody] CreateTripBody body,
-        [FromServices] IQuoteTokenService quoteTokenService,
+        [FromServices] CreateTripHandler handler,
         CancellationToken ct)
     {
-        var riderId = Guid.TryParse(User.FindFirst("sub")?.Value, out var sub)
-            ? sub
-            : Guid.NewGuid();
-
-        if (!quoteTokenService.TryParseToken(body.QuoteToken, out var quote))
-            return Unauthorized(new { error = "invalid_quote_token" });
-
-        if (quote.IsExpired(DateTimeOffset.UtcNow))
-            return BadRequest(new { error = "quote_expired" });
+        var riderId = GetUserIdOrThrow(User);
 
         var req = new CreateTripRequest(
-            riderId,
-            body.PickupLat,
-            body.PickupLng,
-            body.DropoffLat,
-            body.DropoffLng,
-            body.Mode,
-            quote);
+            RiderId: riderId,
+            PickupLat: body.PickupLat,
+            PickupLng: body.PickupLng,
+            DropoffLat: body.DropoffLat,
+            DropoffLng: body.DropoffLng,
+            Mode: body.Mode,
+            QuoteToken: body.QuoteToken
+        );
 
-        var result = await _create.HandleAsync(req, ct);
-
-        return CreatedAtAction(nameof(GetById), new { tripId = result.TripId }, result);
+        try
+        {
+            var result = await handler.HandleAsync(req, ct);
+            return CreatedAtAction(nameof(GetById), new { tripId = result.TripId }, result);
+        }
+        catch (UnauthorizedAccessException ex) when (ex.Message == "invalid_quote_token")
+        {
+            return Unauthorized(new { error = "invalid_quote_token" });
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "quote_expired")
+        {
+            return BadRequest(new { error = "quote_expired" });
+        }
+        catch (ArgumentOutOfRangeException ex) when (ex.ParamName == "Mode")
+        {
+            return BadRequest(new { error = "invalid_transport_mode" });
+        }
     }
 
     // =========================
-    // REQUEST TRIP
+    // REQUEST TRIP (Quoted -> Requested, triggar dispatch)
     // =========================
     [HttpPost("{tripId:guid}/request")]
-    [Authorize]
+    [Authorize(Policy = "Rider")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> RequestTrip(
         [FromRoute] Guid tripId,
         [FromBody] RequestTripBody body,
@@ -107,13 +98,21 @@ public sealed class TripsController : ControllerBase
         {
             return BadRequest(new { error = "quote_expired" });
         }
+        catch (InvalidOperationException ex) when (ex.Message == "trip_not_requestable")
+        {
+            return BadRequest(new { error = "trip_not_requestable" });
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "concurrency_conflict")
+        {
+            return BadRequest(new { error = "concurrency_conflict" });
+        }
     }
 
     // =========================
-    // ACCEPT TRIP
+    // ACCEPT (Driver)
     // =========================
     [HttpPost("{tripId:guid}/accept")]
-    [Authorize]
+    [Authorize(Policy = "Driver")]
     public async Task<IActionResult> Accept(
         [FromRoute] Guid tripId,
         [FromBody] AcceptTripBody body,
@@ -125,19 +124,15 @@ public sealed class TripsController : ControllerBase
             var req = new AcceptTripRequest(tripId, body.DriverId, body.VehicleId);
             var result = await handler.HandleAsync(req, ct);
 
-            return Ok(new
-            {
-                tripId = result.TripId,
-                status = result.Status.ToString()
-            });
+            return Ok(new { tripId = result.TripId, status = result.Status.ToString() });
         }
         catch (KeyNotFoundException ex) when (ex.Message == "trip_not_found")
         {
             return NotFound(new { error = "trip_not_found" });
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException ex)
         {
-            return BadRequest(new { error = "trip_not_requestable" });
+            return BadRequest(new { error = ex.Message });
         }
         catch (ArgumentException ex)
         {
@@ -146,10 +141,10 @@ public sealed class TripsController : ControllerBase
     }
 
     // =========================
-    // ARRIVE
+    // ARRIVE (Driver)
     // =========================
     [HttpPost("{tripId:guid}/arrive")]
-    [Authorize]
+    [Authorize(Policy = "Driver")]
     public async Task<IActionResult> Arrive(
         [FromRoute] Guid tripId,
         [FromServices] ArriveTripHandler handler,
@@ -160,11 +155,7 @@ public sealed class TripsController : ControllerBase
             var req = new ArriveTripRequest(tripId);
             var result = await handler.HandleAsync(req, ct);
 
-            return Ok(new
-            {
-                tripId = result.TripId,
-                status = result.Status.ToString()
-            });
+            return Ok(new { tripId = result.TripId, status = result.Status.ToString() });
         }
         catch (KeyNotFoundException)
         {
@@ -177,10 +168,10 @@ public sealed class TripsController : ControllerBase
     }
 
     // =========================
-    // START
+    // START (Driver)
     // =========================
     [HttpPost("{tripId:guid}/start")]
-    [Authorize]
+    [Authorize(Policy = "Driver")]
     public async Task<IActionResult> Start(
         [FromRoute] Guid tripId,
         [FromServices] StartTripHandler handler,
@@ -191,11 +182,7 @@ public sealed class TripsController : ControllerBase
             var req = new StartTripRequest(tripId);
             var result = await handler.HandleAsync(req, ct);
 
-            return Ok(new
-            {
-                tripId = result.TripId,
-                status = result.Status.ToString()
-            });
+            return Ok(new { tripId = result.TripId, status = result.Status.ToString() });
         }
         catch (KeyNotFoundException)
         {
@@ -208,10 +195,10 @@ public sealed class TripsController : ControllerBase
     }
 
     // =========================
-    // COMPLETE
+    // COMPLETE (Driver)
     // =========================
     [HttpPost("{tripId:guid}/complete")]
-    [Authorize]
+    [Authorize(Policy = "Driver")]
     public async Task<IActionResult> Complete(
         [FromRoute] Guid tripId,
         [FromServices] CompleteTripHandler handler,
@@ -222,11 +209,7 @@ public sealed class TripsController : ControllerBase
             var req = new CompleteTripRequest(tripId);
             var result = await handler.HandleAsync(req, ct);
 
-            return Ok(new
-            {
-                tripId = result.TripId,
-                status = result.Status.ToString()
-            });
+            return Ok(new { tripId = result.TripId, status = result.Status.ToString() });
         }
         catch (KeyNotFoundException)
         {
@@ -242,7 +225,6 @@ public sealed class TripsController : ControllerBase
     // GET BY ID
     // =========================
     [HttpGet("{tripId:guid}")]
-    [Authorize]
     public async Task<IActionResult> GetById(
         [FromRoute] Guid tripId,
         [FromServices] ITripRepository repo,
@@ -252,5 +234,28 @@ public sealed class TripsController : ControllerBase
         if (trip is null) return NotFound(new { error = "trip_not_found" });
 
         return Ok(Fair.Api.Contracts.TripDto.FromDomain(trip));
+    }
+
+    // =========================
+    // BODY RECORDS (API = primitives)
+    // =========================
+    public sealed record CreateTripBody(
+        double PickupLat,
+        double PickupLng,
+        double DropoffLat,
+        double DropoffLng,
+        int Mode,
+        string QuoteToken);
+
+    public sealed record RequestTripBody(string QuoteToken);
+
+    public sealed record AcceptTripBody(Guid DriverId, string VehicleId);
+
+    private static Guid GetUserIdOrThrow(ClaimsPrincipal user)
+    {
+        var sub = user.FindFirstValue("sub") ?? user.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (Guid.TryParse(sub, out var id)) return id;
+
+        throw new UnauthorizedAccessException("missing_or_invalid_sub");
     }
 }

@@ -1,0 +1,1065 @@
+[1mdiff --git a/Fair.Api/Controllers/TripsController.cs b/Fair.Api/Controllers/TripsController.cs[m
+[1mindex 82288cd..304bbb9 100644[m
+[1m--- a/Fair.Api/Controllers/TripsController.cs[m
+[1m+++ b/Fair.Api/Controllers/TripsController.cs[m
+[36m@@ -1,83 +1,74 @@[m
+ using Fair.Application.Trips;[m
+[31m-using Fair.Application.Trips.CreateTrip;[m
+[31m-using Fair.Application.Trips.Quoting;[m
+[31m-using Fair.Application.Trips.RequestTrip;[m
+ using Fair.Application.Trips.AcceptTrip;[m
+ using Fair.Application.Trips.ArriveTrip;[m
+[31m-using Fair.Application.Trips.StartTrip;[m
+ using Fair.Application.Trips.CompleteTrip;[m
+[31m-using Fair.Domain.Trips;[m
+[32m+[m[32musing Fair.Application.Trips.CreateTrip;[m
+[32m+[m[32musing Fair.Application.Trips.RequestTrip;[m
+[32m+[m[32musing Fair.Application.Trips.StartTrip;[m
+ using Microsoft.AspNetCore.Authorization;[m
+ using Microsoft.AspNetCore.Mvc;[m
+[32m+[m[32musing System.Security.Claims;[m
+ [m
+ namespace Fair.Api.Controllers;[m
+ [m
+ [ApiController][m
+ [Route("api/v1/trips")][m
+[32m+[m[32m[Authorize][m
+ public sealed class TripsController : ControllerBase[m
+ {[m
+[31m-    private readonly CreateTripHandler _create;[m
+[31m-[m
+[31m-    public TripsController(CreateTripHandler create)[m
+[31m-    {[m
+[31m-        _create = create;[m
+[31m-    }[m
+[31m-[m
+[31m-    // =========================[m
+[31m-    // BODY RECORDS[m
+[31m-    // =========================[m
+[31m-[m
+[31m-    public sealed record CreateTripBody([m
+[31m-        double PickupLat,[m
+[31m-        double PickupLng,[m
+[31m-        double DropoffLat,[m
+[31m-        double DropoffLng,[m
+[31m-        TransportMode Mode,[m
+[31m-        string QuoteToken);[m
+[31m-[m
+[31m-    public sealed record RequestTripBody(string QuoteToken);[m
+[31m-[m
+[31m-    public sealed record AcceptTripBody(Guid DriverId, string VehicleId);[m
+[31m-[m
+     // =========================[m
+[31m-    // CREATE TRIP[m
+[32m+[m[32m    // CREATE TRIP (Draft -> Quoted)[m
+     // =========================[m
+     [HttpPost][m
+[31m-    [Authorize][m
+[32m+[m[32m    [Authorize(Policy = "Rider")][m
+[32m+[m[32m    [ProducesResponseType(StatusCodes.Status201Created)][m
+[32m+[m[32m    [ProducesResponseType(StatusCodes.Status401Unauthorized)][m
+[32m+[m[32m    [ProducesResponseType(StatusCodes.Status400BadRequest)][m
+     public async Task<IActionResult> Create([m
+         [FromBody] CreateTripBody body,[m
+[31m-        [FromServices] IQuoteTokenService quoteTokenService,[m
+[32m+[m[32m        [FromServices] CreateTripHandler handler,[m
+         CancellationToken ct)[m
+     {[m
+[31m-        var riderId = Guid.TryParse(User.FindFirst("sub")?.Value, out var sub)[m
+[31m-            ? sub[m
+[31m-            : Guid.NewGuid();[m
+[31m-[m
+[31m-        if (!quoteTokenService.TryParseToken(body.QuoteToken, out var quote))[m
+[31m-            return Unauthorized(new { error = "invalid_quote_token" });[m
+[31m-[m
+[31m-        if (quote.IsExpired(DateTimeOffset.UtcNow))[m
+[31m-            return BadRequest(new { error = "quote_expired" });[m
+[32m+[m[32m        var riderId = GetUserIdOrThrow(User);[m
+ [m
+         var req = new CreateTripRequest([m
+[31m-            riderId,[m
+[31m-            body.PickupLat,[m
+[31m-            body.PickupLng,[m
+[31m-            body.DropoffLat,[m
+[31m-            body.DropoffLng,[m
+[31m-            body.Mode,[m
+[31m-            quote);[m
+[32m+[m[32m            RiderId: riderId,[m
+[32m+[m[32m            PickupLat: body.PickupLat,[m
+[32m+[m[32m            PickupLng: body.PickupLng,[m
+[32m+[m[32m            DropoffLat: body.DropoffLat,[m
+[32m+[m[32m            DropoffLng: body.DropoffLng,[m
+[32m+[m[32m            Mode: body.Mode,[m
+[32m+[m[32m            QuoteToken: body.QuoteToken[m
+[32m+[m[32m        );[m
+ [m
+[31m-        var result = await _create.HandleAsync(req, ct);[m
+[31m-[m
+[31m-        return CreatedAtAction(nameof(GetById), new { tripId = result.TripId }, result);[m
+[32m+[m[32m        try[m
+[32m+[m[32m        {[m
+[32m+[m[32m            var result = await handler.HandleAsync(req, ct);[m
+[32m+[m[32m            return CreatedAtAction(nameof(GetById), new { tripId = result.TripId }, result);[m
+[32m+[m[32m        }[m
+[32m+[m[32m        catch (UnauthorizedAccessException ex) when (ex.Message == "invalid_quote_token")[m
+[32m+[m[32m        {[m
+[32m+[m[32m            return Unauthorized(new { error = "invalid_quote_token" });[m
+[32m+[m[32m        }[m
+[32m+[m[32m        catch (InvalidOperationException ex) when (ex.Message == "quote_expired")[m
+[32m+[m[32m        {[m
+[32m+[m[32m            return BadRequest(new { error = "quote_expired" });[m
+[32m+[m[32m        }[m
+[32m+[m[32m        catch (ArgumentOutOfRangeException ex) when (ex.ParamName == "Mode")[m
+[32m+[m[32m        {[m
+[32m+[m[32m            return BadRequest(new { error = "invalid_transport_mode" });[m
+[32m+[m[32m        }[m
+     }[m
+ [m
+     // =========================[m
+[31m-    // REQUEST TRIP[m
+[32m+[m[32m    // REQUEST TRIP (Quoted -> Requested, triggar dispatch)[m
+     // =========================[m
+     [HttpPost("{tripId:guid}/request")][m
+[31m-    [Authorize][m
+[32m+[m[32m    [Authorize(Policy = "Rider")][m
+[32m+[m[32m    [ProducesResponseType(StatusCodes.Status200OK)][m
+[32m+[m[32m    [ProducesResponseType(StatusCodes.Status404NotFound)][m
+[32m+[m[32m    [ProducesResponseType(StatusCodes.Status401Unauthorized)][m
+[32m+[m[32m    [ProducesResponseType(StatusCodes.Status400BadRequest)][m
+     public async Task<IActionResult> RequestTrip([m
+         [FromRoute] Guid tripId,[m
+         [FromBody] RequestTripBody body,[m
+[36m@@ -107,13 +98,21 @@[m [mpublic sealed class TripsController : ControllerBase[m
+         {[m
+             return BadRequest(new { error = "quote_expired" });[m
+         }[m
+[32m+[m[32m        catch (InvalidOperationException ex) when (ex.Message == "trip_not_requestable")[m
+[32m+[m[32m        {[m
+[32m+[m[32m            return BadRequest(new { error = "trip_not_requestable" });[m
+[32m+[m[32m        }[m
+[32m+[m[32m        catch (InvalidOperationException ex) when (ex.Message == "concurrency_conflict")[m
+[32m+[m[32m        {[m
+[32m+[m[32m            return BadRequest(new { error = "concurrency_conflict" });[m
+[32m+[m[32m        }[m
+     }[m
+ [m
+     // =========================[m
+[31m-    // ACCEPT TRIP[m
+[32m+[m[32m    // ACCEPT (Driver)[m
+     // =========================[m
+     [HttpPost("{tripId:guid}/accept")][m
+[31m-    [Authorize][m
+[32m+[m[32m    [Authorize(Policy = "Driver")][m
+     public async Task<IActionResult> Accept([m
+         [FromRoute] Guid tripId,[m
+         [FromBody] AcceptTripBody body,[m
+[36m@@ -125,19 +124,15 @@[m [mpublic sealed class TripsController : ControllerBase[m
+             var req = new AcceptTripRequest(tripId, body.DriverId, body.VehicleId);[m
+             var result = await handler.HandleAsync(req, ct);[m
+ [m
+[31m-            return Ok(new[m
+[31m-            {[m
+[31m-                tripId = result.TripId,[m
+[31m-                status = result.Status.ToString()[m
+[31m-            });[m
+[32m+[m[32m            return Ok(new { tripId = result.TripId, status = result.Status.ToString() });[m
+         }[m
+         catch (KeyNotFoundException ex) when (ex.Message == "trip_not_found")[m
+         {[m
+             return NotFound(new { error = "trip_not_found" });[m
+         }[m
+[31m-        catch (InvalidOperationException)[m
+[32m+[m[32m        catch (InvalidOperationException ex)[m
+         {[m
+[31m-            return BadRequest(new { error = "trip_not_requestable" });[m
+[32m+[m[32m            return BadRequest(new { error = ex.Message });[m
+         }[m
+         catch (ArgumentException ex)[m
+         {[m
+[36m@@ -146,10 +141,10 @@[m [mpublic sealed class TripsController : ControllerBase[m
+     }[m
+ [m
+     // =========================[m
+[31m-    // ARRIVE[m
+[32m+[m[32m    // ARRIVE (Driver)[m
+     // =========================[m
+     [HttpPost("{tripId:guid}/arrive")][m
+[31m-    [Authorize][m
+[32m+[m[32m    [Authorize(Policy = "Driver")][m
+     public async Task<IActionResult> Arrive([m
+         [FromRoute] Guid tripId,[m
+         [FromServices] ArriveTripHandler handler,[m
+[36m@@ -160,11 +155,7 @@[m [mpublic sealed class TripsController : ControllerBase[m
+             var req = new ArriveTripRequest(tripId);[m
+             var result = await handler.HandleAsync(req, ct);[m
+ [m
+[31m-            return Ok(new[m
+[31m-            {[m
+[31m-                tripId = result.TripId,[m
+[31m-                status = result.Status.ToString()[m
+[31m-            });[m
+[32m+[m[32m            return Ok(new { tripId = result.TripId, status = result.Status.ToString() });[m
+         }[m
+         catch (KeyNotFoundException)[m
+         {[m
+[36m@@ -177,10 +168,10 @@[m [mpublic sealed class TripsController : ControllerBase[m
+     }[m
+ [m
+     // =========================[m
+[31m-    // START[m
+[32m+[m[32m    // START (Driver)[m
+     // =========================[m
+     [HttpPost("{tripId:guid}/start")][m
+[31m-    [Authorize][m
+[32m+[m[32m    [Authorize(Policy = "Driver")][m
+     public async Task<IActionResult> Start([m
+         [FromRoute] Guid tripId,[m
+         [FromServices] StartTripHandler handler,[m
+[36m@@ -191,11 +182,7 @@[m [mpublic sealed class TripsController : ControllerBase[m
+             var req = new StartTripRequest(tripId);[m
+             var result = await handler.HandleAsync(req, ct);[m
+ [m
+[31m-            return Ok(new[m
+[31m-            {[m
+[31m-                tripId = result.TripId,[m
+[31m-                status = result.Status.ToString()[m
+[31m-            });[m
+[32m+[m[32m            return Ok(new { tripId = result.TripId, status = result.Status.ToString() });[m
+         }[m
+         catch (KeyNotFoundException)[m
+         {[m
+[36m@@ -208,10 +195,10 @@[m [mpublic sealed class TripsController : ControllerBase[m
+     }[m
+ [m
+     // =========================[m
+[31m-    // COMPLETE[m
+[32m+[m[32m    // COMPLETE (Driver)[m
+     // =========================[m
+     [HttpPost("{tripId:guid}/complete")][m
+[31m-    [Authorize][m
+[32m+[m[32m    [Authorize(Policy = "Driver")][m
+     public async Task<IActionResult> Complete([m
+         [FromRoute] Guid tripId,[m
+         [FromServices] CompleteTripHandler handler,[m
+[36m@@ -222,11 +209,7 @@[m [mpublic sealed class TripsController : ControllerBase[m
+             var req = new CompleteTripRequest(tripId);[m
+             var result = await handler.HandleAsync(req, ct);[m
+ [m
+[31m-            return Ok(new[m
+[31m-            {[m
+[31m-                tripId = result.TripId,[m
+[31m-                status = result.Status.ToString()[m
+[31m-            });[m
+[32m+[m[32m            return Ok(new { tripId = result.TripId, status = result.Status.ToString() });[m
+         }[m
+         catch (KeyNotFoundException)[m
+         {[m
+[36m@@ -242,7 +225,6 @@[m [mpublic sealed class TripsController : ControllerBase[m
+     // GET BY ID[m
+     // =========================[m
+     [HttpGet("{tripId:guid}")][m
+[31m-    [Authorize][m
+     public async Task<IActionResult> GetById([m
+         [FromRoute] Guid tripId,[m
+         [FromServices] ITripRepository repo,[m
+[36m@@ -253,4 +235,27 @@[m [mpublic sealed class TripsController : ControllerBase[m
+ [m
+         return Ok(Fair.Api.Contracts.TripDto.FromDomain(trip));[m
+     }[m
+[31m-}[m
+[32m+[m
+[32m+[m[32m    // =========================[m
+[32m+[m[32m    // BODY RECORDS (API = primitives)[m
+[32m+[m[32m    // =========================[m
+[32m+[m[32m    public sealed record CreateTripBody([m
+[32m+[m[32m        double PickupLat,[m
+[32m+[m[32m        double PickupLng,[m
+[32m+[m[32m        double DropoffLat,[m
+[32m+[m[32m        double DropoffLng,[m
+[32m+[m[32m        int Mode,[m
+[32m+[m[32m        string QuoteToken);[m
+[32m+[m
+[32m+[m[32m    public sealed record RequestTripBody(string QuoteToken);[m
+[32m+[m
+[32m+[m[32m    public sealed record AcceptTripBody(Guid DriverId, string VehicleId);[m
+[32m+[m
+[32m+[m[32m    private static Guid GetUserIdOrThrow(ClaimsPrincipal user)[m
+[32m+[m[32m    {[m
+[32m+[m[32m        var sub = user.FindFirstValue("sub") ?? user.FindFirstValue(ClaimTypes.NameIdentifier);[m
+[32m+[m[32m        if (Guid.TryParse(sub, out var id)) return id;[m
+[32m+[m
+[32m+[m[32m        throw new UnauthorizedAccessException("missing_or_invalid_sub");[m
+[32m+[m[32m    }[m
+[32m+[m[32m}[m
+\ No newline at end of file[m
+[1mdiff --git a/Fair.Api/Program.cs b/Fair.Api/Program.cs[m
+[1mindex f495e48..60aa00d 100644[m
+[1m--- a/Fair.Api/Program.cs[m
+[1m+++ b/Fair.Api/Program.cs[m
+[36m@@ -1,4 +1,5 @@[m
+ using Fair.Api.AuthZ;[m
+[32m+[m[32musing Fair.Application.Dispatch;[m
+ using Fair.Application.Drivers;[m
+ using Fair.Application.Me;[m
+ using Fair.Application.Trips.AcceptTrip;[m
+[36m@@ -36,6 +37,11 @@[m [mbuilder.Services.AddScoped<ArriveTripHandler>();[m
+ builder.Services.AddScoped<StartTripHandler>();[m
+ builder.Services.AddScoped<CompleteTripHandler>();[m
+ [m
+[32m+[m[32m// 🔥 DISPATCH[m
+[32m+[m[32mbuilder.Services.AddScoped<GetMyOffers>();[m
+[32m+[m[32mbuilder.Services.AddScoped<AcceptDispatchOffer>();[m
+[32m+[m[32mbuilder.Services.AddScoped<CreateDispatchOffers>();[m
+[32m+[m
+ // Identity[m
+ builder.Services.AddScoped<GetMe>();[m
+ [m
+[1mdiff --git a/src/Fair.Application/CreateTrip/CreateTripHandler.cs b/src/Fair.Application/CreateTrip/CreateTripHandler.cs[m
+[1mindex 5f5e6c1..b29c0ee 100644[m
+[1m--- a/src/Fair.Application/CreateTrip/CreateTripHandler.cs[m
+[1m+++ b/src/Fair.Application/CreateTrip/CreateTripHandler.cs[m
+[36m@@ -1,3 +1,4 @@[m
+[32m+[m[32musing Fair.Application.Trips.Quoting;[m
+ using Fair.Domain.Trips;[m
+ [m
+ namespace Fair.Application.Trips.CreateTrip;[m
+[36m@@ -5,20 +6,38 @@[m [mnamespace Fair.Application.Trips.CreateTrip;[m
+ public sealed class CreateTripHandler[m
+ {[m
+     private readonly ITripRepository _repo;[m
+[32m+[m[32m    private readonly IQuoteTokenService _quoteTokens;[m
+ [m
+[31m-    public CreateTripHandler(ITripRepository repo) => _repo = repo;[m
+[32m+[m[32m    public CreateTripHandler(ITripRepository repo, IQuoteTokenService quoteTokens)[m
+[32m+[m[32m    {[m
+[32m+[m[32m        _repo = repo;[m
+[32m+[m[32m        _quoteTokens = quoteTokens;[m
+[32m+[m[32m    }[m
+ [m
+     public async Task<CreateTripResult> HandleAsync(CreateTripRequest req, CancellationToken ct = default)[m
+     {[m
+[32m+[m[32m        var now = DateTimeOffset.UtcNow;[m
+[32m+[m
+[32m+[m[32m        if (!_quoteTokens.TryParseToken(req.QuoteToken, out var quote))[m
+[32m+[m[32m            throw new UnauthorizedAccessException("invalid_quote_token");[m
+[32m+[m
+[32m+[m[32m        if (quote.IsExpired(now))[m
+[32m+[m[32m            throw new InvalidOperationException("quote_expired");[m
+[32m+[m
+[32m+[m[32m        if (!Enum.IsDefined(typeof(TransportMode), req.Mode))[m
+[32m+[m[32m            throw new ArgumentOutOfRangeException(nameof(req.Mode), "invalid_transport_mode");[m
+[32m+[m
+         var pickup = Location.Create(req.PickupLat, req.PickupLng);[m
+         var dropoff = Location.Create(req.DropoffLat, req.DropoffLng);[m
+ [m
+[31m-        var trip = Trip.CreateDraft(req.RiderId, pickup, dropoff, req.Mode);[m
+[32m+[m[32m        var mode = (TransportMode)req.Mode;[m
+[32m+[m
+[32m+[m[32m        var trip = Trip.CreateDraft(req.RiderId, pickup, dropoff, mode);[m
+ [m
+[31m-        trip.ApplyQuote(req.Quote);[m
+[31m-        trip.Request();[m
+[32m+[m[32m        // Viktigt: bara quote här. Request sker i /request-endpointen.[m
+[32m+[m[32m        trip.ApplyQuote(quote);[m
+ [m
+         await _repo.AddAsync(trip, ct);[m
+         return new CreateTripResult(trip.Id);[m
+     }[m
+[31m-}[m
+[32m+[m[32m}[m
+\ No newline at end of file[m
+[1mdiff --git a/src/Fair.Application/CreateTrip/CreateTripRequest.cs b/src/Fair.Application/CreateTrip/CreateTripRequest.cs[m
+[1mindex 0addf7d..eeb442f 100644[m
+[1m--- a/src/Fair.Application/CreateTrip/CreateTripRequest.cs[m
+[1m+++ b/src/Fair.Application/CreateTrip/CreateTripRequest.cs[m
+[36m@@ -1,5 +1,3 @@[m
+[31m-using Fair.Domain.Trips;[m
+[31m-[m
+ namespace Fair.Application.Trips.CreateTrip;[m
+ [m
+ public sealed record CreateTripRequest([m
+[36m@@ -8,5 +6,6 @@[m [mpublic sealed record CreateTripRequest([m
+     double PickupLng,[m
+     double DropoffLat,[m
+     double DropoffLng,[m
+[31m-    TransportMode Mode,[m
+[31m-    TripQuote Quote);[m
+[32m+[m[32m    int Mode,[m
+[32m+[m[32m    string QuoteToken[m
+[32m+[m[32m);[m
+\ No newline at end of file[m
+[1mdiff --git a/src/Fair.Application/CreateTrip/CreateTripResult.cs b/src/Fair.Application/CreateTrip/CreateTripResult.cs[m
+[1mindex 7cec847..2ac9939 100644[m
+[1m--- a/src/Fair.Application/CreateTrip/CreateTripResult.cs[m
+[1m+++ b/src/Fair.Application/CreateTrip/CreateTripResult.cs[m
+[36m@@ -1,3 +1,3 @@[m
+ namespace Fair.Application.Trips.CreateTrip;[m
+ [m
+[31m-public sealed record CreateTripResult(Guid TripId);[m
+[32m+[m[32mpublic sealed record CreateTripResult(Guid TripId);[m
+\ No newline at end of file[m
+[1mdiff --git a/src/Fair.Application/Dispatch/AcceptDispatchOffer.cs b/src/Fair.Application/Dispatch/AcceptDispatchOffer.cs[m
+[1mindex 319f308..df558c4 100644[m
+[1m--- a/src/Fair.Application/Dispatch/AcceptDispatchOffer.cs[m
+[1m+++ b/src/Fair.Application/Dispatch/AcceptDispatchOffer.cs[m
+[36m@@ -8,47 +8,67 @@[m [mpublic sealed class AcceptDispatchOffer[m
+ {[m
+     private readonly IDispatchOfferRepository _offers;[m
+     private readonly ITripRepository _trips;[m
+[32m+[m[32m    private readonly IDriverAssignmentRepository _assignments;[m
+ [m
+[31m-    public AcceptDispatchOffer(IDispatchOfferRepository offers, ITripRepository trips)[m
+[32m+[m[32m    public AcceptDispatchOffer([m
+[32m+[m[32m        IDispatchOfferRepository offers,[m
+[32m+[m[32m        ITripRepository trips,[m
+[32m+[m[32m        IDriverAssignmentRepository assignments)[m
+     {[m
+         _offers = offers;[m
+         _trips = trips;[m
+[32m+[m[32m        _assignments = assignments;[m
+     }[m
+ [m
+     public async Task<bool> Handle(ClaimsPrincipal user, Guid offerId, CancellationToken ct)[m
+     {[m
+[31m-        var driverId =[m
+[31m-            user.FindFirst(ClaimTypes.NameIdentifier)?.Value ??[m
+[32m+[m[32m        var sub =[m
+             user.FindFirst("sub")?.Value ??[m
+[32m+[m[32m            user.FindFirst(ClaimTypes.NameIdentifier)?.Value ??[m
+             throw new InvalidOperationException("Missing user id claim (sub/nameidentifier).");[m
+ [m
+[32m+[m[32m        if (!Guid.TryParse(sub, out var driverId) || driverId == Guid.Empty)[m
+[32m+[m[32m            throw new InvalidOperationException("Invalid user id claim (expected Guid).");[m
+[32m+[m
+         var now = DateTimeOffset.UtcNow;[m
+ [m
+         // 1) Läs offer[m
+         var offer = await _offers.GetByIdAsync(offerId, ct);[m
+         if (offer is null) return false;[m
+ [m
+[31m-        // 2) Försök acceptera offer atomiskt (förhindrar dubbel-accept)[m
+[31m-        var accepted = await _offers.TryAcceptAsync(offerId, driverId, now, ct);[m
+[31m-        if (!accepted) return false;[m
+[32m+[m[32m        // 2) Busy-skydd (driver kan inte ta två trips samtidigt)[m
+[32m+[m[32m        var assign = await _assignments.TryAssignAsync(driverId, offer.TripId, ct);[m
+[32m+[m[32m        if (assign == DriverAssignResult.AlreadyAssignedOtherTrip)[m
+[32m+[m[32m            return false;[m
+ [m
+[31m-        // 3) Uppdatera trip med optimistic concurrency[m
+[31m-  // 3) Uppdatera trip med optimistic concurrency[m
+[31m-var trip = await _trips.GetByIdAsync(offer.TripId, ct);[m
+[31m-if (trip is null) return false;[m
+[32m+[m[32m        // 3) Atomic accept i offer-store (single-winner)[m
+[32m+[m[32m        var accepted = await _offers.TryAcceptAsync(offerId, driverId, now, ct);[m
+[32m+[m[32m        if (!accepted)[m
+[32m+[m[32m        {[m
+[32m+[m[32m            await _assignments.ReleaseAsync(driverId, offer.TripId, ct);[m
+[32m+[m[32m            return false;[m
+[32m+[m[32m        }[m
+ [m
+[31m-// v1 placeholder tills vi har riktiga vehicles kopplade till drivers/fleets[m
+[31m-var vehicleId = Guid.Empty;[m
+[32m+[m[32m        // 4) Uppdatera trip med optimistic concurrency[m
+[32m+[m[32m        var trip = await _trips.GetByIdAsync(offer.TripId, ct);[m
+[32m+[m[32m        if (trip is null)[m
+[32m+[m[32m        {[m
+[32m+[m[32m            await _assignments.ReleaseAsync(driverId, offer.TripId, ct);[m
+[32m+[m[32m            return false;[m
+[32m+[m[32m        }[m
+ [m
+[31m-trip.Accept(vehicleId, driverId, now);[m
+[32m+[m[32m        // v1 placeholder tills vi har vehicles kopplade till driver/fleet[m
+[32m+[m[32m        var vehicleId = "DEV_VEHICLE";[m
+ [m
+[31m-var ok = await _trips.UpdateAsync(trip, offer.TripVersion, ct);[m
+[31m-if (!ok)[m
+[31m-{[m
+[31m-    return false;[m
+[31m-}[m
+[32m+[m[32m        trip.Accept(driverId, vehicleId, now);[m
+ [m
+[31m-return true;[m
+[32m+[m[32m        var ok = await _trips.UpdateAsync(trip, offer.TripVersion, ct);[m
+[32m+[m[32m        if (!ok)[m
+[32m+[m[32m        {[m
+[32m+[m[32m            await _assignments.ReleaseAsync(driverId, offer.TripId, ct);[m
+[32m+[m[32m            return false;[m
+[32m+[m[32m        }[m
+ [m
+[32m+[m[32m        return true;[m
+     }[m
+ }[m
+[1mdiff --git a/src/Fair.Application/Dispatch/CreateDispatchOffers.cs b/src/Fair.Application/Dispatch/CreateDispatchOffers.cs[m
+[1mindex c204ccb..7316810 100644[m
+[1m--- a/src/Fair.Application/Dispatch/CreateDispatchOffers.cs[m
+[1m+++ b/src/Fair.Application/Dispatch/CreateDispatchOffers.cs[m
+[36m@@ -14,11 +14,10 @@[m [mpublic sealed class CreateDispatchOffers[m
+     public async Task Handle(Guid tripId, int tripVersion, CancellationToken ct)[m
+     {[m
+         var now = DateTimeOffset.UtcNow;[m
+[31m-        var expires = now.AddSeconds(30); // v1: 30s offer TTL[m
+[32m+[m[32m        var expires = now.AddMinutes(10); // längre TTL så det blir stabilt i Swagger[m
+ [m
+         var onlineDrivers = await _drivers.GetOnlineDriverIdsAsync(ct);[m
+ [m
+[31m-        // v1 matching: broadcast till max 10 online drivers[m
+         var selected = onlineDrivers.Take(10).ToArray();[m
+ [m
+         var offers = selected.Select(driverId => new DispatchOfferDto([m
+[36m@@ -33,4 +32,4 @@[m [mpublic sealed class CreateDispatchOffers[m
+ [m
+         await _offers.AddManyAsync(offers, ct);[m
+     }[m
+[31m-}[m
+[32m+[m[32m}[m
+\ No newline at end of file[m
+[1mdiff --git a/src/Fair.Application/Dispatch/DispatchOfferDto.cs b/src/Fair.Application/Dispatch/DispatchOfferDto.cs[m
+[1mindex b3fb40a..08e47ee 100644[m
+[1m--- a/src/Fair.Application/Dispatch/DispatchOfferDto.cs[m
+[1m+++ b/src/Fair.Application/Dispatch/DispatchOfferDto.cs[m
+[36m@@ -3,7 +3,7 @@[m [mnamespace Fair.Application.Dispatch;[m
+ public sealed record DispatchOfferDto([m
+     Guid OfferId,[m
+     Guid TripId,[m
+[31m-    string DriverId,[m
+[32m+[m[32m    Guid DriverId,[m
+     int TripVersion,[m
+     DateTimeOffset CreatedAtUtc,[m
+     DateTimeOffset ExpiresAtUtc,[m
+[1mdiff --git a/src/Fair.Application/Dispatch/GetMyOffers.cs b/src/Fair.Application/Dispatch/GetMyOffers.cs[m
+[1mindex 1eead08..fc2faf1 100644[m
+[1m--- a/src/Fair.Application/Dispatch/GetMyOffers.cs[m
+[1m+++ b/src/Fair.Application/Dispatch/GetMyOffers.cs[m
+[36m@@ -10,11 +10,14 @@[m [mpublic sealed class GetMyOffers[m
+ [m
+     public Task<IReadOnlyList<DispatchOfferDto>> Handle(ClaimsPrincipal user, CancellationToken ct)[m
+     {[m
+[31m-        var driverId =[m
+[31m-            user.FindFirst(ClaimTypes.NameIdentifier)?.Value ??[m
+[32m+[m[32m        var sub =[m
+             user.FindFirst("sub")?.Value ??[m
+[32m+[m[32m            user.FindFirst(ClaimTypes.NameIdentifier)?.Value ??[m
+             throw new InvalidOperationException("Missing user id claim (sub/nameidentifier).");[m
+ [m
+[32m+[m[32m        if (!Guid.TryParse(sub, out var driverId) || driverId == Guid.Empty)[m
+[32m+[m[32m            throw new InvalidOperationException("Invalid user id claim (expected Guid).");[m
+[32m+[m
+         var now = DateTimeOffset.UtcNow;[m
+         return _offers.GetPendingOffersForDriverAsync(driverId, now, ct);[m
+     }[m
+[1mdiff --git a/src/Fair.Application/Dispatch/IDispatchOfferRepository.cs b/src/Fair.Application/Dispatch/IDispatchOfferRepository.cs[m
+[1mindex 37a9bd9..30b246b 100644[m
+[1m--- a/src/Fair.Application/Dispatch/IDispatchOfferRepository.cs[m
+[1m+++ b/src/Fair.Application/Dispatch/IDispatchOfferRepository.cs[m
+[36m@@ -3,11 +3,11 @@[m [mnamespace Fair.Application.Dispatch;[m
+ public interface IDispatchOfferRepository[m
+ {[m
+     Task AddManyAsync(IEnumerable<DispatchOfferDto> offers, CancellationToken ct);[m
+[31m-    Task<IReadOnlyList<DispatchOfferDto>> GetPendingOffersForDriverAsync(string driverId, DateTimeOffset nowUtc, CancellationToken ct);[m
+[32m+[m[32m    Task<IReadOnlyList<DispatchOfferDto>> GetPendingOffersForDriverAsync(Guid driverId, DateTimeOffset nowUtc, CancellationToken ct);[m
+     Task<DispatchOfferDto?> GetByIdAsync(Guid offerId, CancellationToken ct);[m
+ [m
+     // Atomic accept: returns false if already accepted/expired/not found[m
+[31m-    Task<bool> TryAcceptAsync(Guid offerId, string driverId, DateTimeOffset nowUtc, CancellationToken ct);[m
+[32m+[m[32m    Task<bool> TryAcceptAsync(Guid offerId, Guid driverId, DateTimeOffset nowUtc, CancellationToken ct);[m
+ [m
+     Task ExpireOffersAsync(DateTimeOffset nowUtc, CancellationToken ct);[m
+ }[m
+[1mdiff --git a/src/Fair.Application/Dispatch/IDriverAvailabilityQuery.cs b/src/Fair.Application/Dispatch/IDriverAvailabilityQuery.cs[m
+[1mindex f6fa335..5531247 100644[m
+[1m--- a/src/Fair.Application/Dispatch/IDriverAvailabilityQuery.cs[m
+[1m+++ b/src/Fair.Application/Dispatch/IDriverAvailabilityQuery.cs[m
+[36m@@ -2,5 +2,5 @@[m [mnamespace Fair.Application.Dispatch;[m
+ [m
+ public interface IDriverAvailabilityQuery[m
+ {[m
+[31m-    Task<IReadOnlyList<string>> GetOnlineDriverIdsAsync(CancellationToken ct);[m
+[32m+[m[32m    Task<IReadOnlyList<Guid>> GetOnlineDriverIdsAsync(CancellationToken ct);[m
+ }[m
+[1mdiff --git a/src/Fair.Application/Trips/RequestTrip/RequestTripHandler.cs b/src/Fair.Application/Trips/RequestTrip/RequestTripHandler.cs[m
+[1mindex 80260e2..29de7be 100644[m
+[1m--- a/src/Fair.Application/Trips/RequestTrip/RequestTripHandler.cs[m
+[1m+++ b/src/Fair.Application/Trips/RequestTrip/RequestTripHandler.cs[m
+[36m@@ -1,6 +1,5 @@[m
+[31m-using Fair.Application.Trips;[m
+[32m+[m[32musing Fair.Application.Dispatch;[m
+ using Fair.Application.Trips.Quoting;[m
+[31m-using Fair.Domain.Trips;[m
+ [m
+ namespace Fair.Application.Trips.RequestTrip;[m
+ [m
+[36m@@ -8,59 +7,39 @@[m [mpublic sealed class RequestTripHandler[m
+ {[m
+     private readonly ITripRepository _repo;[m
+     private readonly IQuoteTokenService _quoteTokens;[m
+[32m+[m[32m    private readonly CreateDispatchOffers _dispatch;[m
+ [m
+[31m-    public RequestTripHandler([m
+[31m-        ITripRepository repo,[m
+[31m-        IQuoteTokenService quoteTokens)[m
+[32m+[m[32m    public RequestTripHandler(ITripRepository repo, IQuoteTokenService quoteTokens, CreateDispatchOffers dispatch)[m
+     {[m
+         _repo = repo;[m
+         _quoteTokens = quoteTokens;[m
+[32m+[m[32m        _dispatch = dispatch;[m
+     }[m
+ [m
+[31m-    public async Task<RequestTripResult> HandleAsync([m
+[31m-        RequestTripRequest req,[m
+[31m-        CancellationToken ct = default)[m
+[32m+[m[32m    public async Task<RequestTripResult> HandleAsync(RequestTripRequest req, CancellationToken ct)[m
+     {[m
+[31m-        if (req.TripId == Guid.Empty)[m
+[31m-            throw new ArgumentException("TripId is required.", nameof(req.TripId));[m
+[31m-[m
+[31m-        if (string.IsNullOrWhiteSpace(req.QuoteToken))[m
+[31m-            throw new ArgumentException("QuoteToken is required.", nameof(req.QuoteToken));[m
+[31m-[m
+[31m-        var trip = await _repo.GetByIdAsync(req.TripId, ct);[m
+[31m-        if (trip is null)[m
+[31m-            throw new KeyNotFoundException("trip_not_found");[m
+[31m-[m
+[31m-        // ✅ Idempotens: redan Requested → OK[m
+[31m-        if (trip.Status == TripStatus.Requested)[m
+[31m-            return new RequestTripResult(trip.Id, trip.Status);[m
+[31m-[m
+[31m-        // ❌ För sent i flödet[m
+[31m-        if (trip.Status is TripStatus.Accepted[m
+[31m-            or TripStatus.Arriving[m
+[31m-            or TripStatus.InProgress[m
+[31m-            or TripStatus.Completed)[m
+[31m-            throw new InvalidOperationException("trip_not_requestable");[m
+[32m+[m[32m        var now = DateTimeOffset.UtcNow;[m
+ [m
+[31m-        // 🔐 Parse + validera quote-token[m
+         if (!_quoteTokens.TryParseToken(req.QuoteToken, out var quote))[m
+             throw new UnauthorizedAccessException("invalid_quote_token");[m
+ [m
+[31m-        var now = DateTimeOffset.UtcNow;[m
+[31m-[m
+[31m-        // ⚡ Snabb UX-check (domänen dubbelkollar)[m
+         if (quote.IsExpired(now))[m
+             throw new InvalidOperationException("quote_expired");[m
+ [m
+[31m-        // 🧠 Domain operations[m
+[31m-        trip.ApplyQuote(quote, now);[m
+[32m+[m[32m        var trip = await _repo.GetByIdAsync(req.TripId, ct);[m
+[32m+[m[32m        if (trip is null) throw new KeyNotFoundException("trip_not_found");[m
+[32m+[m
+[32m+[m[32m        var expectedVersion = trip.Version;[m
+[32m+[m
+[32m+[m[32m        // Domain transition[m
+         trip.Request(now);[m
+ [m
+[31m-        // 🔒 Optimistic concurrency (VIKTIGT)[m
+[31m-        var ok = await _repo.UpdateAsync(trip, trip.Version, ct);[m
+[31m-        if (!ok)[m
+[31m-            throw new InvalidOperationException("concurrency_conflict");[m
+[32m+[m[32m        var updated = await _repo.UpdateAsync(trip, expectedVersion, ct);[m
+[32m+[m[32m        if (!updated) throw new InvalidOperationException("concurrency_conflict");[m
+[32m+[m
+[32m+[m[32m        // Dispatch AFTER save[m
+[32m+[m[32m        await _dispatch.Handle(trip.Id, trip.Version, ct);[m
+ [m
+         return new RequestTripResult(trip.Id, trip.Status);[m
+     }[m
+[31m-}[m
+[32m+[m[32m}[m
+\ No newline at end of file[m
+[1mdiff --git a/src/Fair.Application/Trips/RequestTrip/RequestTripRequest.cs b/src/Fair.Application/Trips/RequestTrip/RequestTripRequest.cs[m
+[1mindex c267e36..0c4703e 100644[m
+[1m--- a/src/Fair.Application/Trips/RequestTrip/RequestTripRequest.cs[m
+[1m+++ b/src/Fair.Application/Trips/RequestTrip/RequestTripRequest.cs[m
+[36m@@ -2,4 +2,5 @@[m [mnamespace Fair.Application.Trips.RequestTrip;[m
+ [m
+ public sealed record RequestTripRequest([m
+     Guid TripId,[m
+[31m-    string QuoteToken);[m
+[32m+[m[32m    string QuoteToken[m
+[32m+[m[32m);[m
+\ No newline at end of file[m
+[1mdiff --git a/src/Fair.Application/Trips/RequestTrip/RequestTripResult.cs b/src/Fair.Application/Trips/RequestTrip/RequestTripResult.cs[m
+[1mindex 56320f3..0317ff2 100644[m
+[1m--- a/src/Fair.Application/Trips/RequestTrip/RequestTripResult.cs[m
+[1m+++ b/src/Fair.Application/Trips/RequestTrip/RequestTripResult.cs[m
+[36m@@ -2,6 +2,4 @@[m [musing Fair.Domain.Trips;[m
+ [m
+ namespace Fair.Application.Trips.RequestTrip;[m
+ [m
+[31m-public sealed record RequestTripResult([m
+[31m-    Guid TripId,[m
+[31m-    TripStatus Status);[m
+[32m+[m[32mpublic sealed record RequestTripResult(Guid TripId, TripStatus Status);[m
+\ No newline at end of file[m
+[1mdiff --git a/src/Fair.Application/Trips/StartTrip/CompleteTrip/CompleteTripHandler.cs b/src/Fair.Application/Trips/StartTrip/CompleteTrip/CompleteTripHandler.cs[m
+[1mindex d5846e5..87881c6 100644[m
+[1m--- a/src/Fair.Application/Trips/StartTrip/CompleteTrip/CompleteTripHandler.cs[m
+[1m+++ b/src/Fair.Application/Trips/StartTrip/CompleteTrip/CompleteTripHandler.cs[m
+[36m@@ -1,3 +1,4 @@[m
+[32m+[m[32musing Fair.Application.Dispatch;[m
+ using Fair.Application.Trips;[m
+ using Fair.Domain.Trips;[m
+ [m
+[36m@@ -6,10 +7,12 @@[m [mnamespace Fair.Application.Trips.CompleteTrip;[m
+ public sealed class CompleteTripHandler[m
+ {[m
+     private readonly ITripRepository _repo;[m
+[32m+[m[32m    private readonly IDriverAssignmentRepository _assignments;[m
+ [m
+[31m-    public CompleteTripHandler(ITripRepository repo)[m
+[32m+[m[32m    public CompleteTripHandler(ITripRepository repo, IDriverAssignmentRepository assignments)[m
+     {[m
+         _repo = repo;[m
+[32m+[m[32m        _assignments = assignments;[m
+     }[m
+ [m
+     public async Task<CompleteTripResult> HandleAsync([m
+[36m@@ -27,14 +30,21 @@[m [mpublic sealed class CompleteTripHandler[m
+         if (trip.Status == TripStatus.Completed)[m
+             return new CompleteTripResult(trip.Id, trip.Status);[m
+ [m
+[31m-        // Domain rule: måste vara InProgress[m
+[32m+[m[32m        // Domänregel: måste vara InProgress (Trip.Complete kastar annars)[m
+         trip.Complete(DateTimeOffset.UtcNow);[m
+ [m
+[31m-        // 🔒 Optimistic concurrency[m
+[31m-        var ok = await _repo.UpdateAsync(trip, trip.Version, ct);[m
+[32m+[m[32m        // 🔒 Optimistic concurrency (viktigt: expectedVersion ska vara versionen vi läste)[m
+[32m+[m[32m        var expectedVersion = trip.Version;[m
+[32m+[m[32m        var ok = await _repo.UpdateAsync(trip, expectedVersion, ct);[m
+         if (!ok)[m
+             throw new InvalidOperationException("concurrency_conflict");[m
+ [m
+[32m+[m[32m        // 🔓 Release driver busy (om driver finns)[m
+[32m+[m[32m        if (trip.DriverId.HasValue && trip.DriverId.Value != Guid.Empty)[m
+[32m+[m[32m        {[m
+[32m+[m[32m            await _assignments.ReleaseAsync(trip.DriverId.Value, trip.Id, ct);[m
+[32m+[m[32m        }[m
+[32m+[m
+         return new CompleteTripResult(trip.Id, trip.Status);[m
+     }[m
+ }[m
+[1mdiff --git a/src/Fair.Infrastructure/DependencyInjection.cs b/src/Fair.Infrastructure/DependencyInjection.cs[m
+[1mindex 6e094f3..cdd191f 100644[m
+[1m--- a/src/Fair.Infrastructure/DependencyInjection.cs[m
+[1m+++ b/src/Fair.Infrastructure/DependencyInjection.cs[m
+[36m@@ -1,9 +1,11 @@[m
+ using Fair.Application.Abstractions;[m
+ using Fair.Application.Auth;[m
+[32m+[m[32musing Fair.Application.Dispatch;[m
+ using Fair.Application.Drivers;[m
+ using Fair.Application.Trips;[m
+ using Fair.Application.Trips.Quoting;[m
+ using Fair.Infrastructure.Auth;[m
+[32m+[m[32musing Fair.Infrastructure.Dispatch;[m
+ using Fair.Infrastructure.Drivers;[m
+ using Fair.Infrastructure.Trips;[m
+ using Fair.Infrastructure.Trips.Quoting;[m
+[36m@@ -22,16 +24,37 @@[m [mpublic static class DependencyInjection[m
+         services.AddScoped<IJwtTokenService, JwtTokenService>();[m
+ [m
+         // =========================[m
+[31m-        // AuthZ / Roles (för /me + policies)[m
+[32m+[m[32m        // AuthZ / Roles (SINGLETON SHARED)[m
+         // =========================[m
+         services.AddSingleton<InMemoryRoleAssignmentRepository>();[m
+[31m-        services.AddSingleton<IRoleAssignmentRepository>(sp => sp.GetRequiredService<InMemoryRoleAssignmentRepository>());[m
+[31m-        services.AddSingleton<IRoleAssignmentWriter>(sp => sp.GetRequiredService<InMemoryRoleAssignmentRepository>());[m
+[32m+[m
+[32m+[m[32m        services.AddSingleton<IRoleAssignmentRepository>(sp =>[m
+[32m+[m[32m            sp.GetRequiredService<InMemoryRoleAssignmentRepository>());[m
+[32m+[m
+[32m+[m[32m        services.AddSingleton<IRoleAssignmentWriter>(sp =>[m
+[32m+[m[32m            sp.GetRequiredService<InMemoryRoleAssignmentRepository>());[m
+ [m
+         // =========================[m
+[31m-        // Drivers (availability foundation)[m
+[32m+[m[32m        // Drivers (CRITICAL SINGLETON SHARING)[m
+         // =========================[m
+[31m-        services.AddSingleton<IDriverProfileRepository, InMemoryDriverProfileRepository>();[m
+[32m+[m[32m        services.AddSingleton<InMemoryDriverProfileRepository>();[m
+[32m+[m
+[32m+[m[32m        services.AddSingleton<IDriverProfileRepository>(sp =>[m
+[32m+[m[32m            sp.GetRequiredService<InMemoryDriverProfileRepository>());[m
+[32m+[m
+[32m+[m[32m        services.AddSingleton<IDriverAvailabilityQuery>(sp =>[m
+[32m+[m[32m            sp.GetRequiredService<InMemoryDriverProfileRepository>());[m
+[32m+[m
+[32m+[m[32m        // =========================[m
+[32m+[m[32m        // Dispatch (offers + assignments)[m
+[32m+[m[32m        // =========================[m
+[32m+[m[32m        services.AddSingleton<IDispatchOfferRepository, InMemoryDispatchOfferRepository>();[m
+[32m+[m[32m        services.AddSingleton<IDriverAssignmentRepository, InMemoryDriverAssignmentRepository>();[m
+[32m+[m
+[32m+[m[32m        // Dispatch use cases[m
+[32m+[m[32m        services.AddScoped<CreateDispatchOffers>();[m
+[32m+[m[32m        services.AddScoped<GetMyOffers>();[m
+[32m+[m[32m        services.AddScoped<AcceptDispatchOffer>();[m
+ [m
+         // =========================[m
+         // Trips[m
+[36m@@ -47,5 +70,4 @@[m [mpublic static class DependencyInjection[m
+ [m
+         return services;[m
+     }[m
+[31m-}[m
+[31m-[m
+[32m+[m[32m}[m
+\ No newline at end of file[m
+[1mdiff --git a/src/Fair.Infrastructure/Dispatch/InMemoryDispatchOfferRepository.cs b/src/Fair.Infrastructure/Dispatch/InMemoryDispatchOfferRepository.cs[m
+[1mindex dccc74f..4ef0ebe 100644[m
+[1m--- a/src/Fair.Infrastructure/Dispatch/InMemoryDispatchOfferRepository.cs[m
+[1m+++ b/src/Fair.Infrastructure/Dispatch/InMemoryDispatchOfferRepository.cs[m
+[36m@@ -8,7 +8,7 @@[m [mpublic sealed class InMemoryDispatchOfferRepository : IDispatchOfferRepository[m
+     private sealed record Offer([m
+         Guid OfferId,[m
+         Guid TripId,[m
+[31m-        string DriverId,[m
+[32m+[m[32m        Guid DriverId,[m
+         int TripVersion,[m
+         DateTimeOffset CreatedAtUtc,[m
+         DateTimeOffset ExpiresAtUtc,[m
+[36m@@ -17,23 +17,33 @@[m [mpublic sealed class InMemoryDispatchOfferRepository : IDispatchOfferRepository[m
+ [m
+     private readonly ConcurrentDictionary<Guid, Offer> _store = new();[m
+ [m
+[32m+[m[32m    // Per-trip lock för att garantera single-winner accept (undviker race mellan offers)[m
+[32m+[m[32m    private readonly ConcurrentDictionary<Guid, object> _tripLocks = new();[m
+[32m+[m
+     public Task AddManyAsync(IEnumerable<DispatchOfferDto> offers, CancellationToken ct)[m
+     {[m
+         foreach (var o in offers)[m
+         {[m
+             _store.TryAdd(o.OfferId, new Offer([m
+[31m-                o.OfferId, o.TripId, o.DriverId, o.TripVersion, o.CreatedAtUtc, o.ExpiresAtUtc, o.Status[m
+[32m+[m[32m                o.OfferId,[m
+[32m+[m[32m                o.TripId,[m
+[32m+[m[32m                o.DriverId,[m
+[32m+[m[32m                o.TripVersion,[m
+[32m+[m[32m                o.CreatedAtUtc,[m
+[32m+[m[32m                o.ExpiresAtUtc,[m
+[32m+[m[32m                o.Status[m
+             ));[m
+         }[m
+[32m+[m
+         return Task.CompletedTask;[m
+     }[m
+ [m
+[31m-    public Task<IReadOnlyList<DispatchOfferDto>> GetPendingOffersForDriverAsync(string driverId, DateTimeOffset nowUtc, CancellationToken ct)[m
+[32m+[m[32m    public Task<IReadOnlyList<DispatchOfferDto>> GetPendingOffersForDriverAsync(Guid driverId, DateTimeOffset nowUtc, CancellationToken ct)[m
+     {[m
+         ExpireInternal(nowUtc);[m
+ [m
+         var list = _store.Values[m
+[31m-            .Where(o => o.DriverId == driverId && o.Status == "PENDING")[m
+[32m+[m[32m            .Where(o => o.DriverId == driverId && o.Status == "PENDING" && o.ExpiresAtUtc > nowUtc)[m
+             .OrderBy(o => o.CreatedAtUtc)[m
+             .Select(ToDto)[m
+             .ToList()[m
+[36m@@ -50,13 +60,21 @@[m [mpublic sealed class InMemoryDispatchOfferRepository : IDispatchOfferRepository[m
+         return Task.FromResult<DispatchOfferDto?>(null);[m
+     }[m
+ [m
+[31m-    public Task<bool> TryAcceptAsync(Guid offerId, string driverId, DateTimeOffset nowUtc, CancellationToken ct)[m
+[32m+[m[32m    // Atomic accept: returns false if already accepted/expired/not found[m
+[32m+[m[32m    public Task<bool> TryAcceptAsync(Guid offerId, Guid driverId, DateTimeOffset nowUtc, CancellationToken ct)[m
+     {[m
+         ExpireInternal(nowUtc);[m
+ [m
+[31m-        while (true)[m
+[32m+[m[32m        if (!_store.TryGetValue(offerId, out var existing))[m
+[32m+[m[32m            return Task.FromResult(false);[m
+[32m+[m
+[32m+[m[32m        // Single-winner per trip[m
+[32m+[m[32m        var gate = _tripLocks.GetOrAdd(existing.TripId, _ => new object());[m
+[32m+[m
+[32m+[m[32m        lock (gate)[m
+         {[m
+[31m-            if (!_store.TryGetValue(offerId, out var existing))[m
+[32m+[m[32m            // re-read under lock[m
+[32m+[m[32m            if (!_store.TryGetValue(offerId, out existing))[m
+                 return Task.FromResult(false);[m
+ [m
+             if (existing.DriverId != driverId)[m
+[36m@@ -68,10 +86,13 @@[m [mpublic sealed class InMemoryDispatchOfferRepository : IDispatchOfferRepository[m
+             if (existing.ExpiresAtUtc <= nowUtc)[m
+                 return Task.FromResult(false);[m
+ [m
+[31m-            var updated = existing with { Status = "ACCEPTED" };[m
+[32m+[m[32m            // Förhindra att en annan offer redan accepterats för samma trip[m
+[32m+[m[32m            var tripAlreadyTaken = _store.Values.Any(o => o.TripId == existing.TripId && o.Status == "ACCEPTED");[m
+[32m+[m[32m            if (tripAlreadyTaken)[m
+[32m+[m[32m                return Task.FromResult(false);[m
+ [m
+[31m-            if (_store.TryUpdate(offerId, updated, existing))[m
+[31m-                return Task.FromResult(true);[m
+[32m+[m[32m            _store[offerId] = existing with { Status = "ACCEPTED" };[m
+[32m+[m[32m            return Task.FromResult(true);[m
+         }[m
+     }[m
+ [m
+[36m@@ -94,6 +115,12 @@[m [mpublic sealed class InMemoryDispatchOfferRepository : IDispatchOfferRepository[m
+     }[m
+ [m
+     private static DispatchOfferDto ToDto(Offer o) => new([m
+[31m-        o.OfferId, o.TripId, o.DriverId, o.TripVersion, o.CreatedAtUtc, o.ExpiresAtUtc, o.Status[m
+[32m+[m[32m        o.OfferId,[m
+[32m+[m[32m        o.TripId,[m
+[32m+[m[32m        o.DriverId,[m
+[32m+[m[32m        o.TripVersion,[m
+[32m+[m[32m        o.CreatedAtUtc,[m
+[32m+[m[32m        o.ExpiresAtUtc,[m
+[32m+[m[32m        o.Status[m
+     );[m
+ }[m
+[1mdiff --git a/src/Fair.Infrastructure/Drivers/InMemoryDriverProfileRepository.cs b/src/Fair.Infrastructure/Drivers/InMemoryDriverProfileRepository.cs[m
+[1mindex 95ab70f..ea9602d 100644[m
+[1m--- a/src/Fair.Infrastructure/Drivers/InMemoryDriverProfileRepository.cs[m
+[1m+++ b/src/Fair.Infrastructure/Drivers/InMemoryDriverProfileRepository.cs[m
+[36m@@ -10,13 +10,21 @@[m [mpublic sealed class InMemoryDriverProfileRepository :[m
+ {[m
+     private sealed record DriverProfile(bool IsOnline, DateTimeOffset LastSeenUtc);[m
+ [m
+[32m+[m[32m    // KEY = userId (sub från JWT)[m
+     private readonly ConcurrentDictionary<string, DriverProfile> _store = new();[m
+ [m
+     public Task<DriverMeDto> GetAsync(string userId, CancellationToken ct)[m
+     {[m
+         var now = DateTimeOffset.UtcNow;[m
+[31m-        var profile = _store.GetOrAdd(userId, _ => new DriverProfile(false, now));[m
+[31m-        return Task.FromResult(new DriverMeDto(userId, profile.IsOnline, profile.LastSeenUtc));[m
+[32m+[m
+[32m+[m[32m        var profile = _store.GetOrAdd([m
+[32m+[m[32m            userId,[m
+[32m+[m[32m            _ => new DriverProfile(false, now));[m
+[32m+[m
+[32m+[m[32m        return Task.FromResult(new DriverMeDto([m
+[32m+[m[32m            userId,[m
+[32m+[m[32m            profile.IsOnline,[m
+[32m+[m[32m            profile.LastSeenUtc));[m
+     }[m
+ [m
+     public Task<DriverMeDto> SetAvailabilityAsync(string userId, bool isOnline, CancellationToken ct)[m
+[36m@@ -30,21 +38,36 @@[m [mpublic sealed class InMemoryDriverProfileRepository :[m
+             {[m
+                 IsOnline = isOnline,[m
+                 LastSeenUtc = now[m
+[31m-            }[m
+[31m-        );[m
+[32m+[m[32m            });[m
+[32m+[m
+[32m+[m[32m        var updated = _store[userId];[m
+ [m
+[31m-        return GetAsync(userId, ct);[m
+[32m+[m[32m        return Task.FromResult(new DriverMeDto([m
+[32m+[m[32m            userId,[m
+[32m+[m[32m            updated.IsOnline,[m
+[32m+[m[32m            updated.LastSeenUtc));[m
+     }[m
+ [m
+[31m-    // 🔥 DISPATCH: lista online drivers[m
+[31m-    public Task<IReadOnlyList<string>> GetOnlineDriverIdsAsync(CancellationToken ct)[m
+[32m+[m[32m    // 🚨 KRITISK för dispatch[m
+[32m+[m[32m    public Task<IReadOnlyList<Guid>> GetOnlineDriverIdsAsync(CancellationToken ct)[m
+     {[m
+[31m-        var online = _store[m
+[32m+[m[32m        // snapshot för thread-safety + debugging[m
+[32m+[m[32m        var snapshot = _store.ToArray();[m
+[32m+[m
+[32m+[m[32m        var online = snapshot[m
+             .Where(kv => kv.Value.IsOnline)[m
+[31m-            .Select(kv => kv.Key)[m
+[32m+[m[32m            .Select(kv =>[m
+[32m+[m[32m            {[m
+[32m+[m[32m                if (Guid.TryParse(kv.Key, out var g))[m
+[32m+[m[32m                    return (Guid?)g;[m
+[32m+[m
+[32m+[m[32m                return null;[m
+[32m+[m[32m            })[m
+[32m+[m[32m            .Where(g => g.HasValue)[m
+[32m+[m[32m            .Select(g => g!.Value)[m
+             .ToList()[m
+             .AsReadOnly();[m
+ [m
+[31m-        return Task.FromResult<IReadOnlyList<string>>(online);[m
+[32m+[m[32m        return Task.FromResult<IReadOnlyList<Guid>>(online);[m
+     }[m
+[31m-}[m
+[32m+[m[32m}[m
+\ No newline at end of file[m
+[1mdiff --git a/src/Fair.Infrastructure/Trips/InMemoryTripRepository.cs b/src/Fair.Infrastructure/Trips/InMemoryTripRepository.cs[m
+[1mindex 738d1bd..6ccb2c4 100644[m
+[1m--- a/src/Fair.Infrastructure/Trips/InMemoryTripRepository.cs[m
+[1m+++ b/src/Fair.Infrastructure/Trips/InMemoryTripRepository.cs[m
+[36m@@ -8,33 +8,52 @@[m [mpublic sealed class InMemoryTripRepository : ITripRepository[m
+ {[m
+     private readonly ConcurrentDictionary<Guid, Trip> _store = new();[m
+ [m
+[32m+[m[32m    // =========================[m
+[32m+[m[32m    // ADD[m
+[32m+[m[32m    // =========================[m
+     public Task AddAsync(Trip trip, CancellationToken ct = default)[m
+     {[m
+[32m+[m[32m        if (trip is null)[m
+[32m+[m[32m            throw new ArgumentNullException(nameof(trip));[m
+[32m+[m
+         if (!_store.TryAdd(trip.Id, trip))[m
+             throw new InvalidOperationException($"Trip already exists: {trip.Id}");[m
+ [m
+         return Task.CompletedTask;[m
+     }[m
+ [m
+[32m+[m[32m    // =========================[m
+[32m+[m[32m    // GET BY ID[m
+[32m+[m[32m    // =========================[m
+     public Task<Trip?> GetByIdAsync(Guid tripId, CancellationToken ct = default)[m
+     {[m
+         _store.TryGetValue(tripId, out var trip);[m
+         return Task.FromResult(trip);[m
+     }[m
+ [m
+[32m+[m[32m    // =========================[m
+[32m+[m[32m    // FORCE UPDATE (legacy/backoffice)[m
+[32m+[m[32m    // =========================[m
+     public Task UpdateAsync(Trip trip, CancellationToken ct = default)[m
+     {[m
+[31m-        // ⚠️ Denna metod ska användas sparsamt.[m
+[31m-        // Den skriver över utan concurrency-skydd (legacy/backoffice-case).[m
+[32m+[m[32m        if (trip is null)[m
+[32m+[m[32m            throw new ArgumentNullException(nameof(trip));[m
+ [m
+[32m+[m[32m        // ⚠️ Använd sparsamt — bypassar optimistic concurrency[m
+         trip.IncrementVersion();[m
+         _store[trip.Id] = trip;[m
+ [m
+         return Task.CompletedTask;[m
+     }[m
+ [m
+[32m+[m[32m    // =========================[m
+[32m+[m[32m    // OPTIMISTIC CONCURRENCY UPDATE[m
+[32m+[m[32m    // =========================[m
+     public Task<bool> UpdateAsync(Trip trip, int expectedVersion, CancellationToken ct = default)[m
+     {[m
+[32m+[m[32m        if (trip is null)[m
+[32m+[m[32m            throw new ArgumentNullException(nameof(trip));[m
+[32m+[m
+         while (true)[m
+         {[m
+             if (!_store.TryGetValue(trip.Id, out var existing))[m
+[36m@@ -43,14 +62,14 @@[m [mpublic sealed class InMemoryTripRepository : ITripRepository[m
+             if (existing.Version != expectedVersion)[m
+                 return Task.FromResult(false);[m
+ [m
+[31m-            // bump version på den inkommande modellen[m
+[32m+[m[32m            // bump version på inkommande modellen[m
+             trip.IncrementVersion();[m
+ [m
+             // CAS-liknande beteende[m
+             if (_store.TryUpdate(trip.Id, trip, existing))[m
+                 return Task.FromResult(true);[m
+ [m
+[31m-            // någon hann emellan — retry loop[m
+[32m+[m[32m            // någon hann emellan → retry[m
+         }[m
+     }[m
+ }[m
