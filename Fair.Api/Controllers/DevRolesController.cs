@@ -23,7 +23,8 @@ public sealed class DevRolesController : ControllerBase
         _getMe = getMe;
     }
 
-    public sealed record GrantRoleRequest(string Role, string? FleetId);
+    // ✅ Swagger kommer nu visa userId istället för fleetId
+    public sealed record GrantRoleRequest(string UserId, string Role, string? FleetId = null);
 
     [HttpPost("grant")]
     public async Task<IActionResult> Grant([FromBody] GrantRoleRequest req, CancellationToken ct)
@@ -32,28 +33,55 @@ public sealed class DevRolesController : ControllerBase
         if (!_env.IsDevelopment())
             return NotFound();
 
+        if (string.IsNullOrWhiteSpace(req.UserId))
+            return BadRequest(new { error = "UserId is required." });
+
+        if (!Guid.TryParse(req.UserId, out var parsedUserId) || parsedUserId == Guid.Empty)
+            return BadRequest(new { error = "UserId must be a non-empty GUID." });
+
         if (string.IsNullOrWhiteSpace(req.Role))
             return BadRequest(new { error = "Role is required." });
 
         // Validate role (tight allow-list)
         var role = req.Role.Trim().ToUpperInvariant();
+
         var allowed = new[]
         {
             Role.Rider, Role.Driver, Role.Owner, Role.FleetAdmin
-        };
+        }
+        .Select(x => x.Trim().ToUpperInvariant())
+        .ToArray();
 
         if (!allowed.Contains(role))
             return BadRequest(new { error = $"Invalid role. Allowed: {string.Join(", ", allowed)}" });
 
-        var userId =
-            User.FindFirst(ClaimTypes.NameIdentifier)?.Value ??
+        // FleetId är optional: validera endast om den skickas
+        if (!string.IsNullOrWhiteSpace(req.FleetId) &&
+            (!Guid.TryParse(req.FleetId, out var parsedFleetId) || parsedFleetId == Guid.Empty))
+        {
+            return BadRequest(new { error = "FleetId must be a non-empty GUID when provided." });
+        }
+
+        await _writer.GrantAsync(req.UserId, role, req.FleetId, ct);
+
+        // Om du gav rollen till DIG SJÄLV: returnera uppdaterad /me (bra DX)
+        var currentUserId =
             User.FindFirst("sub")?.Value ??
-            throw new InvalidOperationException("Missing user id claim (sub/nameidentifier).");
+            User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
-        await _writer.GrantAsync(userId, role, req.FleetId, ct);
+        if (!string.IsNullOrWhiteSpace(currentUserId) &&
+            string.Equals(currentUserId, req.UserId, StringComparison.OrdinalIgnoreCase))
+        {
+            var me = await _getMe.Handle(User, ct);
+            return Ok(me);
+        }
 
-        // Returnera uppdaterad /me direkt (bra DX)
-        var me = await _getMe.Handle(User, ct);
-        return Ok(me);
+        // Annars: returnera bara vad som gjordes
+        return Ok(new
+        {
+            userId = req.UserId,
+            role,
+            fleetId = req.FleetId
+        });
     }
 }

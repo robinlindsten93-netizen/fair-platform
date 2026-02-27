@@ -19,6 +19,7 @@ using Microsoft.OpenApi.Models;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using Fair.Api.Swagger;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -60,10 +61,10 @@ builder.Services.AddSwaggerGen(c =>
     {
         Name = "Authorization",
         Type = SecuritySchemeType.Http,
-        Scheme = "Bearer",
+        Scheme = "bearer",
         BearerFormat = "JWT",
         In = ParameterLocation.Header,
-        Description = "Bearer {din JWT-token}"
+        Description = "Skriv: Bearer {din JWT-token}"
     });
 
     c.AddSecurityRequirement(new OpenApiSecurityRequirement
@@ -80,6 +81,9 @@ builder.Services.AddSwaggerGen(c =>
             Array.Empty<string>()
         }
     });
+
+    // ✅ HÄR kopplar du in ditt OTP-exempel-filter:
+    c.OperationFilter<Fair.Api.Swagger.OtpExamplesOperationFilter>();
 });
 
 // =========================
@@ -101,7 +105,6 @@ var issuer = jwt["Issuer"] ?? "fair-api";
 var audience = jwt["Audience"] ?? "fair-client";
 var key = jwt["Key"] ?? "DEV_ONLY_super_long_secret_key_change_later_1234567890";
 
-// säkerställ att "sub" inte mappas om
 JwtSecurityTokenHandler.DefaultInboundClaimTypeMap.Clear();
 
 builder.Services
@@ -117,12 +120,9 @@ builder.Services
             ValidIssuer = issuer,
             ValidAudience = audience,
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key)),
-            ClockSkew = TimeSpan.FromSeconds(30),
+            ClockSkew = TimeSpan.FromMinutes(30),
 
-            // viktigt: stabil userId mapping
             NameClaimType = JwtRegisteredClaimNames.Sub,
-
-            // hygien (vi använder repo för authz)
             RoleClaimType = ClaimTypes.Role
         };
     });
@@ -145,7 +145,6 @@ builder.Services.AddAuthorization(options =>
         .AddRequirements(new RequireFleetRoleRequirement(Role.Owner, Role.FleetAdmin)));
 });
 
-// handler som läser roller från repo
 builder.Services.AddSingleton<IAuthorizationHandler, RoleAuthorizationHandler>();
 
 var app = builder.Build();
@@ -179,17 +178,12 @@ app.UseHttpsRedirection();
 if (app.Environment.IsDevelopment())
 {
     app.UseCors("dev");
+    app.UseSwagger();
+    app.UseSwaggerUI();
 }
-
-app.UseSwagger();
-app.UseSwaggerUI(c =>
-    c.SwaggerEndpoint("/swagger/v1/swagger.json", "Fair.Api v1"));
 
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
 app.Run();
-
-
-

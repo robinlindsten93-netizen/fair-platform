@@ -8,7 +8,7 @@ public sealed class GetMyOffers
 
     public GetMyOffers(IDispatchOfferRepository offers) => _offers = offers;
 
-    public Task<IReadOnlyList<DispatchOfferDto>> Handle(ClaimsPrincipal user, CancellationToken ct)
+    public async Task<IReadOnlyList<DispatchOfferDto>> Handle(ClaimsPrincipal user, CancellationToken ct)
     {
         var sub =
             user.FindFirst("sub")?.Value ??
@@ -19,6 +19,14 @@ public sealed class GetMyOffers
             throw new InvalidOperationException("Invalid user id claim (expected Guid).");
 
         var now = DateTimeOffset.UtcNow;
-        return _offers.GetPendingOffersForDriverAsync(driverId, now, ct);
+
+        // 🔎 DEV log: när det "slutar funka" är det nästan alltid fel driverId eller att TTL gått ut.
+        Console.WriteLine($"[GetMyOffers] driverId={driverId} nowUtc={now:O}");
+
+        var list = await _offers.GetPendingOffersForDriverAsync(driverId, now, ct);
+
+        Console.WriteLine($"[GetMyOffers] pendingCount={list.Count}");
+
+        return list;
     }
 }
