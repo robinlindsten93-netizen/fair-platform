@@ -61,6 +61,7 @@ public sealed class InMemoryDispatchOfferRepository : IDispatchOfferRepository
     }
 
     // Atomic accept: returns false if already accepted/expired/not found
+    // ✅ Single-winner per trip + expire all other pending offers on same trip
     public Task<bool> TryAcceptAsync(Guid offerId, Guid driverId, DateTimeOffset nowUtc, CancellationToken ct)
     {
         ExpireInternal(nowUtc);
@@ -68,7 +69,6 @@ public sealed class InMemoryDispatchOfferRepository : IDispatchOfferRepository
         if (!_store.TryGetValue(offerId, out var existing))
             return Task.FromResult(false);
 
-        // Single-winner per trip
         var gate = _tripLocks.GetOrAdd(existing.TripId, _ => new object());
 
         lock (gate)
@@ -91,7 +91,19 @@ public sealed class InMemoryDispatchOfferRepository : IDispatchOfferRepository
             if (tripAlreadyTaken)
                 return Task.FromResult(false);
 
+            // Winner
             _store[offerId] = existing with { Status = "ACCEPTED" };
+
+            // Expire all other pending offers for the same trip
+            foreach (var kv in _store)
+            {
+                var o = kv.Value;
+                if (o.TripId == existing.TripId && o.OfferId != offerId && o.Status == "PENDING")
+                {
+                    _store.TryUpdate(kv.Key, o with { Status = "EXPIRED" }, o);
+                }
+            }
+
             return Task.FromResult(true);
         }
     }

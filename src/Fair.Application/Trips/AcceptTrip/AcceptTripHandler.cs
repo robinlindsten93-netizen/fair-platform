@@ -1,5 +1,4 @@
 using Fair.Application.Trips;
-using Fair.Domain.Trips;
 
 namespace Fair.Application.Trips.AcceptTrip;
 
@@ -21,10 +20,10 @@ public sealed class AcceptTripHandler
         // Domain rule: måste vara Requested
         trip.Accept(request.DriverId, request.VehicleId, DateTimeOffset.UtcNow);
 
-        var ok = await _repo.UpdateAsync(trip, trip.Version, ct);
-if (!ok)
-    throw new InvalidOperationException("concurrency_conflict");
-
+        var expectedVersion = trip.Version;
+        var ok = await _repo.UpdateAsync(trip, expectedVersion, ct);
+        if (!ok)
+            throw new InvalidOperationException("concurrency_conflict");
 
         return new AcceptTripResult(trip.Id, trip.Status);
     }

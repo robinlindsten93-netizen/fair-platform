@@ -48,6 +48,9 @@ public static class DependencyInjection
         // =========================
         // Dispatch (offers + assignments)
         // =========================
+        services.Configure<DispatchOptions>(config.GetSection("Dispatch"));
+        services.AddHostedService<DispatchOfferExpiryService>();
+
         services.AddSingleton<IDispatchOfferRepository, InMemoryDispatchOfferRepository>();
         services.AddSingleton<IDriverAssignmentRepository, InMemoryDriverAssignmentRepository>();
 

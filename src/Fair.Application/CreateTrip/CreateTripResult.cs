@@ -1,3 +1,5 @@
+using Fair.Domain.Trips;
+
 namespace Fair.Application.Trips.CreateTrip;
 
-public sealed record CreateTripResult(Guid TripId);
+public sealed record CreateTripResult(Guid TripId, TripStatus Status);

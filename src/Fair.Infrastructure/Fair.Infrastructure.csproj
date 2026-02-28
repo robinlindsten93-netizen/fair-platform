@@ -9,6 +9,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Fair.Domain\Fair.Domain.csproj" />
     <ProjectReference Include="..\Fair.Application\Fair.Application.csproj" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
   <ItemGroup>

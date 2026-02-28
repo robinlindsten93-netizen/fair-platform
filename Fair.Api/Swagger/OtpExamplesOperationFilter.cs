@@ -26,7 +26,7 @@ public sealed class OtpExamplesOperationFilter : IOperationFilter
             json.Example = new OpenApiObject
             {
                 ["phone"] = new OpenApiString("+46701234567"),
-                ["code"]  = new OpenApiString("123456")
+                ["code"] = new OpenApiString("123456")
             };
         }
     }

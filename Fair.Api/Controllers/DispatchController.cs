@@ -43,9 +43,11 @@ public sealed class DispatchController : ControllerBase
             return BadRequest(new { error = "offer_id_required" });
 
         var ok = await uc.Handle(User, body.OfferId, ct);
-        if (!ok)
-            return BadRequest(new { error = "offer_not_accepted" });
 
-        return Ok(new { accepted = true });
+        // ✅ idempotent-friendly response
+        return Ok(new
+        {
+            accepted = ok
+        });
     }
 }

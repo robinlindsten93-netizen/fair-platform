@@ -32,15 +32,15 @@ public sealed class TripQuotesController : ControllerBase
             return BadRequest(new { error = "invalid_location", detail = ex.Message });
         }
 
-         // Senior: använd tolerans för geo-jämförelse
-         const double epsilon = 0.000001;
+        // Senior: använd tolerans för geo-jämförelse
+        const double epsilon = 0.000001;
 
-         var sameLocation =
-         Math.Abs(pickup.Latitude - dropoff.Latitude) < epsilon &&
-         Math.Abs(pickup.Longitude - dropoff.Longitude) < epsilon;
+        var sameLocation =
+        Math.Abs(pickup.Latitude - dropoff.Latitude) < epsilon &&
+        Math.Abs(pickup.Longitude - dropoff.Longitude) < epsilon;
 
-         if (sameLocation)
-         return BadRequest(new { error = "pickup_equals_dropoff" });
+        if (sameLocation)
+            return BadRequest(new { error = "pickup_equals_dropoff" });
 
 
         var nowUtc = DateTimeOffset.UtcNow;

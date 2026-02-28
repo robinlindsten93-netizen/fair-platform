@@ -30,7 +30,8 @@ public sealed class RequestTripHandler
         var trip = await _repo.GetByIdAsync(req.TripId, ct);
         if (trip is null) throw new KeyNotFoundException("trip_not_found");
 
-        // ✅ Idempotency: redan requestad (eller längre fram) -> returnera utan att ändra
+        // ✅ Idempotency: om den redan är Requested eller längre, gör inget.
+        // (Vi kör INTE dispatch igen här)
         if (trip.Status is TripStatus.Requested
             or TripStatus.Accepted
             or TripStatus.Arriving
@@ -40,21 +41,19 @@ public sealed class RequestTripHandler
             return new RequestTripResult(trip.Id, trip.Status);
         }
 
+        // Endast Quoted kan requestas enligt domänen.
+        if (trip.Status != TripStatus.Quoted)
+            throw new InvalidOperationException("trip_not_requestable");
+
         var expectedVersion = trip.Version;
 
-        // ✅ Apply quote bara när domänen tillåter
-        if (trip.Status is TripStatus.Draft or TripStatus.Quoted)
-        {
-            trip.ApplyQuote(quote, now);
-        }
-
-        // ✅ Quoted -> Requested
+        // Domain transition: Quoted -> Requested
         trip.Request(now);
 
         var updated = await _repo.UpdateAsync(trip, expectedVersion, ct);
         if (!updated) throw new InvalidOperationException("concurrency_conflict");
 
-        // Dispatch AFTER save (use post-save version)
+        // ✅ Dispatch AFTER save (post-save version) och bara när vi faktiskt requestade
         await _dispatch.Handle(trip.Id, trip.Version, ct);
 
         return new RequestTripResult(trip.Id, trip.Status);

@@ -1,10 +1,11 @@
 using Fair.Application.Trips;
+using Fair.Application.Trips.Queries;
 using Fair.Domain.Trips;
 using System.Collections.Concurrent;
 
 namespace Fair.Infrastructure.Trips;
 
-public sealed class InMemoryTripRepository : ITripRepository
+public sealed class InMemoryTripRepository : ITripRepository, ITripListSource
 {
     private readonly ConcurrentDictionary<Guid, Trip> _store = new();
 
@@ -29,6 +30,16 @@ public sealed class InMemoryTripRepository : ITripRepository
     {
         _store.TryGetValue(tripId, out var trip);
         return Task.FromResult(trip);
+    }
+
+    // =========================
+    // LIST ALL (READ-MODEL SUPPORT)
+    // =========================
+    public Task<IReadOnlyList<Trip>> ListAllAsync(CancellationToken ct = default)
+    {
+        // Snapshot of values at call time
+        var list = _store.Values.ToList().AsReadOnly();
+        return Task.FromResult<IReadOnlyList<Trip>>(list);
     }
 
     // =========================
