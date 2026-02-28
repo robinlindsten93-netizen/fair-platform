@@ -20,6 +20,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using Fair.Api.Swagger;
+using Fair.Api.Dispatch;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -27,6 +28,8 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.Configure<DispatchOptions>(builder.Configuration.GetSection("Dispatch"));
+builder.Services.AddHostedService<DispatchOfferExpiryService>();
 
 // =========================
 // Handlers / Use cases
