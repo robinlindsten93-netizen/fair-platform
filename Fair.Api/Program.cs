@@ -21,6 +21,7 @@ using System.Security.Claims;
 using System.Text;
 using Fair.Api.Swagger;
 using Fair.Api.Dispatch;
+using Fair.Application.Trips.Queries.Active;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -40,6 +41,10 @@ builder.Services.AddScoped<AcceptTripHandler>();
 builder.Services.AddScoped<ArriveTripHandler>();
 builder.Services.AddScoped<StartTripHandler>();
 builder.Services.AddScoped<CompleteTripHandler>();
+
+
+builder.Services.AddScoped<GetMyTrips>();
+builder.Services.AddScoped<GetMyActiveTrip>();
 
 // 🔥 DISPATCH
 builder.Services.AddScoped<GetMyOffers>();

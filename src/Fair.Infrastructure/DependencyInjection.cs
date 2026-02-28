@@ -11,6 +11,9 @@ using Fair.Infrastructure.Trips;
 using Fair.Infrastructure.Trips.Quoting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Fair.Application.Trips.Guards;
+using Fair.Application.Trips.Queries;
+using Fair.Infrastructure.Trips.Queries;
 
 namespace Fair.Infrastructure;
 
@@ -62,7 +65,15 @@ public static class DependencyInjection
         // =========================
         // Trips
         // =========================
+
+        // Trips (write)
         services.AddSingleton<ITripRepository, InMemoryTripRepository>();
+
+        // Trips (read)
+        services.AddSingleton<ITripReadRepository, InMemoryTripReadRepository>();
+
+        // Guards (Application)
+        services.AddScoped<ActiveTripGuard>();
 
         // =========================
         // Quoting

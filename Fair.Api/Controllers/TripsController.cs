@@ -1,10 +1,8 @@
-using Fair.Application.Dispatch;
 using Fair.Application.Trips;
 using Fair.Application.Trips.AcceptTrip;
 using Fair.Application.Trips.ArriveTrip;
 using Fair.Application.Trips.CompleteTrip;
 using Fair.Application.Trips.CreateTrip;
-using Fair.Application.Trips.Queries;
 using Fair.Application.Trips.RequestTrip;
 using Fair.Application.Trips.StartTrip;
 using Microsoft.AspNetCore.Authorization;
@@ -18,9 +16,6 @@ namespace Fair.Api.Controllers;
 [Authorize]
 public sealed class TripsController : ControllerBase
 {
-    // =========================
-    // CREATE TRIP (Draft -> Quoted)
-    // =========================
     [HttpPost]
     [Authorize(Policy = "Rider")]
     public async Task<IActionResult> Create(
@@ -59,9 +54,6 @@ public sealed class TripsController : ControllerBase
         }
     }
 
-    // =========================
-    // REQUEST TRIP
-    // =========================
     [HttpPost("{tripId:guid}/request")]
     [Authorize(Policy = "Rider")]
     public async Task<IActionResult> RequestTrip(
@@ -74,12 +66,7 @@ public sealed class TripsController : ControllerBase
         {
             var req = new RequestTripRequest(tripId, body.QuoteToken);
             var result = await handler.HandleAsync(req, ct);
-
-            return Ok(new
-            {
-                tripId = result.TripId,
-                status = result.Status.ToString()
-            });
+            return Ok(new { tripId = result.TripId, status = result.Status.ToString() });
         }
         catch (KeyNotFoundException ex) when (ex.Message == "trip_not_found")
         {
@@ -103,9 +90,6 @@ public sealed class TripsController : ControllerBase
         }
     }
 
-    // =========================
-    // ACCEPT (Driver — guarded)
-    // =========================
     [HttpPost("{tripId:guid}/accept")]
     [Authorize(Policy = "Driver")]
     public async Task<IActionResult> Accept(
@@ -117,10 +101,8 @@ public sealed class TripsController : ControllerBase
         try
         {
             var driverId = GetUserIdOrThrow(User);
-
             var req = new AcceptTripRequest(tripId, driverId, body.VehicleId);
             var result = await handler.HandleAsync(req, ct);
-
             return Ok(new { tripId = result.TripId, status = result.Status.ToString() });
         }
         catch (KeyNotFoundException ex) when (ex.Message == "trip_not_found")
@@ -145,9 +127,6 @@ public sealed class TripsController : ControllerBase
         }
     }
 
-    // =========================
-    // ARRIVE
-    // =========================
     [HttpPost("{tripId:guid}/arrive")]
     [Authorize(Policy = "Driver")]
     public async Task<IActionResult> Arrive(
@@ -170,9 +149,6 @@ public sealed class TripsController : ControllerBase
         }
     }
 
-    // =========================
-    // START
-    // =========================
     [HttpPost("{tripId:guid}/start")]
     [Authorize(Policy = "Driver")]
     public async Task<IActionResult> Start(
@@ -195,9 +171,6 @@ public sealed class TripsController : ControllerBase
         }
     }
 
-    // =========================
-    // COMPLETE
-    // =========================
     [HttpPost("{tripId:guid}/complete")]
     [Authorize(Policy = "Driver")]
     public async Task<IActionResult> Complete(
@@ -220,79 +193,6 @@ public sealed class TripsController : ControllerBase
         }
     }
 
-    // =========================
-    // READ: MY TRIPS (Rider)
-    // =========================
-    [HttpGet("mine")]
-    [Authorize(Policy = "Rider")]
-    public async Task<IActionResult> GetMine(
-        [FromServices] ITripRepository trips,
-        [FromServices] ITripReadRepository? reads,
-        CancellationToken ct)
-    {
-        var riderId = GetUserIdOrThrow(User);
-
-        // Preferred: read-model
-        if (reads is not null)
-        {
-            var list = await reads.GetByRiderAsync(riderId, ct);
-            return Ok(list);
-        }
-
-        // Fallback: write store (in-memory only)
-        if (trips is ITripListSource listSource)
-        {
-            var all = await listSource.ListAllAsync(ct);
-            var list = all
-                .Where(t => t.RiderId == riderId)
-                .OrderByDescending(t => t.CreatedAtUtc)
-                .Select(Fair.Api.Contracts.TripDto.FromDomain)
-                .ToList();
-
-            return Ok(list);
-        }
-
-        return Ok(Array.Empty<object>());
-    }
-
-    // =========================
-    // READ: MY TRIPS (Driver)
-    // =========================
-    [HttpGet("driver/mine")]
-    [Authorize(Policy = "Driver")]
-    public async Task<IActionResult> GetDriverMine(
-        [FromServices] ITripRepository trips,
-        [FromServices] ITripReadRepository? reads,
-        CancellationToken ct)
-    {
-        var driverId = GetUserIdOrThrow(User);
-
-        // Preferred: read-model
-        if (reads is not null)
-        {
-            var list = await reads.GetByDriverAsync(driverId, ct);
-            return Ok(list);
-        }
-
-        // Fallback: write store (in-memory only)
-        if (trips is ITripListSource listSource)
-        {
-            var all = await listSource.ListAllAsync(ct);
-            var list = all
-                .Where(t => t.DriverId.HasValue && t.DriverId.Value == driverId)
-                .OrderByDescending(t => t.CreatedAtUtc)
-                .Select(Fair.Api.Contracts.TripDto.FromDomain)
-                .ToList();
-
-            return Ok(list);
-        }
-
-        return Ok(Array.Empty<object>());
-    }
-
-    // =========================
-    // GET BY ID
-    // =========================
     [HttpGet("{tripId:guid}")]
     public async Task<IActionResult> GetById(
         [FromRoute] Guid tripId,
@@ -301,13 +201,9 @@ public sealed class TripsController : ControllerBase
     {
         var trip = await repo.GetByIdAsync(tripId, ct);
         if (trip is null) return NotFound(new { error = "trip_not_found" });
-
         return Ok(Fair.Api.Contracts.TripDto.FromDomain(trip));
     }
 
-    // =========================
-    // BODY RECORDS
-    // =========================
     public sealed record CreateTripBody(
         double PickupLat,
         double PickupLng,
@@ -324,7 +220,6 @@ public sealed class TripsController : ControllerBase
     {
         var sub = user.FindFirstValue("sub") ?? user.FindFirstValue(ClaimTypes.NameIdentifier);
         if (Guid.TryParse(sub, out var id)) return id;
-
         throw new UnauthorizedAccessException("missing_or_invalid_sub");
     }
 }
