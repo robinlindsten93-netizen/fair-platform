@@ -10,7 +10,7 @@ public sealed class InMemoryDriverProfileRepository :
 {
     private sealed record DriverProfile(bool IsOnline, DateTimeOffset LastSeenUtc);
 
-    // KEY = userId (sub från JWT)
+    // KEY = userId (sub från JWT) — string representation of Guid in dev
     private readonly ConcurrentDictionary<string, DriverProfile> _store = new();
 
     public Task<DriverMeDto> GetAsync(string userId, CancellationToken ct)
@@ -48,26 +48,33 @@ public sealed class InMemoryDriverProfileRepository :
             updated.LastSeenUtc));
     }
 
-    // 🚨 KRITISK för dispatch
+    // 🚨 KRITISK för dispatch (bulk)
     public Task<IReadOnlyList<Guid>> GetOnlineDriverIdsAsync(CancellationToken ct)
     {
-        // snapshot för thread-safety + debugging
         var snapshot = _store.ToArray();
 
         var online = snapshot
             .Where(kv => kv.Value.IsOnline)
-            .Select(kv =>
-            {
-                if (Guid.TryParse(kv.Key, out var g))
-                    return (Guid?)g;
-
-                return null;
-            })
+            .Select(kv => Guid.TryParse(kv.Key, out var g) ? (Guid?)g : null)
             .Where(g => g.HasValue)
             .Select(g => g!.Value)
             .ToList()
             .AsReadOnly();
 
         return Task.FromResult<IReadOnlyList<Guid>>(online);
+    }
+
+    // ✅ NEW: snabb "point lookup" (guards/filters)
+    public Task<bool> IsDriverOnlineAsync(Guid driverId, CancellationToken ct)
+    {
+        if (driverId == Guid.Empty)
+            return Task.FromResult(false);
+
+        var key = driverId.ToString();
+
+        if (!_store.TryGetValue(key, out var profile))
+            return Task.FromResult(false);
+
+        return Task.FromResult(profile.IsOnline);
     }
 }

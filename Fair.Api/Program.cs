@@ -1,4 +1,5 @@
 using Fair.Api.AuthZ;
+using Fair.Api.Swagger;
 using Fair.Application.Dispatch;
 using Fair.Application.Drivers;
 using Fair.Application.Me;
@@ -8,8 +9,10 @@ using Fair.Application.Trips.CompleteTrip;
 using Fair.Application.Trips.CreateTrip;
 using Fair.Application.Trips.RequestTrip;
 using Fair.Application.Trips.StartTrip;
+using Fair.Application.Trips.Queries.Active;
 using Fair.Domain.Auth;
 using Fair.Infrastructure;
+using Fair.Infrastructure.Dispatch; // 👈 worker options + expiry service
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics;
@@ -19,17 +22,26 @@ using Microsoft.OpenApi.Models;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using Fair.Api.Swagger;
-using Fair.Api.Dispatch;
-using Fair.Application.Trips.Queries.Active;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 
+// =========================
+// Infrastructure
+// =========================
 builder.Services.AddInfrastructure(builder.Configuration);
-builder.Services.Configure<DispatchOptions>(builder.Configuration.GetSection("Dispatch"));
+
+// ✅ Application dispatch options (WAVES etc)
+builder.Services.Configure<Fair.Application.Dispatch.DispatchOptions>(
+    builder.Configuration.GetSection("Dispatch"));
+
+// ✅ Worker options (expiry sweep)
+builder.Services.Configure<DispatchWorkerOptions>(
+    builder.Configuration.GetSection("DispatchWorker"));
+
+// ✅ Background expiry worker
 builder.Services.AddHostedService<DispatchOfferExpiryService>();
 
 // =========================
@@ -41,7 +53,6 @@ builder.Services.AddScoped<AcceptTripHandler>();
 builder.Services.AddScoped<ArriveTripHandler>();
 builder.Services.AddScoped<StartTripHandler>();
 builder.Services.AddScoped<CompleteTripHandler>();
-
 
 builder.Services.AddScoped<GetMyTrips>();
 builder.Services.AddScoped<GetMyActiveTrip>();
@@ -90,8 +101,7 @@ builder.Services.AddSwaggerGen(c =>
         }
     });
 
-    // ✅ HÄR kopplar du in ditt OTP-exempel-filter:
-    c.OperationFilter<Fair.Api.Swagger.OtpExamplesOperationFilter>();
+    c.OperationFilter<OtpExamplesOperationFilter>();
 });
 
 // =========================
@@ -136,7 +146,7 @@ builder.Services
     });
 
 // =========================
-// Authorization (repo-baserad)
+// Authorization
 // =========================
 builder.Services.AddAuthorization(options =>
 {

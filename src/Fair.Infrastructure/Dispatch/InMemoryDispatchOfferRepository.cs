@@ -16,8 +16,6 @@ public sealed class InMemoryDispatchOfferRepository : IDispatchOfferRepository
     );
 
     private readonly ConcurrentDictionary<Guid, Offer> _store = new();
-
-    // Per-trip lock för att garantera single-winner accept (undviker race mellan offers)
     private readonly ConcurrentDictionary<Guid, object> _tripLocks = new();
 
     public Task AddManyAsync(IEnumerable<DispatchOfferDto> offers, CancellationToken ct)
@@ -25,16 +23,10 @@ public sealed class InMemoryDispatchOfferRepository : IDispatchOfferRepository
         foreach (var o in offers)
         {
             _store.TryAdd(o.OfferId, new Offer(
-                o.OfferId,
-                o.TripId,
-                o.DriverId,
-                o.TripVersion,
-                o.CreatedAtUtc,
-                o.ExpiresAtUtc,
-                o.Status
+                o.OfferId, o.TripId, o.DriverId, o.TripVersion,
+                o.CreatedAtUtc, o.ExpiresAtUtc, o.Status
             ));
         }
-
         return Task.CompletedTask;
     }
 
@@ -60,8 +52,22 @@ public sealed class InMemoryDispatchOfferRepository : IDispatchOfferRepository
         return Task.FromResult<DispatchOfferDto?>(null);
     }
 
-    // Atomic accept: returns false if already accepted/expired/not found
-    // ✅ Single-winner per trip + expire all other pending offers on same trip
+    public Task<bool> ExistsForTripVersionAsync(Guid tripId, int tripVersion, CancellationToken ct)
+    {
+        var exists = _store.Values.Any(o => o.TripId == tripId && o.TripVersion == tripVersion);
+        return Task.FromResult(exists);
+    }
+
+    public Task<IReadOnlySet<Guid>> GetOfferedDriverIdsAsync(Guid tripId, int tripVersion, CancellationToken ct)
+    {
+        var set = _store.Values
+            .Where(o => o.TripId == tripId && o.TripVersion == tripVersion)
+            .Select(o => o.DriverId)
+            .ToHashSet();
+
+        return Task.FromResult<IReadOnlySet<Guid>>(set);
+    }
+
     public Task<bool> TryAcceptAsync(Guid offerId, Guid driverId, DateTimeOffset nowUtc, CancellationToken ct)
     {
         ExpireInternal(nowUtc);
@@ -73,7 +79,6 @@ public sealed class InMemoryDispatchOfferRepository : IDispatchOfferRepository
 
         lock (gate)
         {
-            // re-read under lock
             if (!_store.TryGetValue(offerId, out existing))
                 return Task.FromResult(false);
 
@@ -86,15 +91,12 @@ public sealed class InMemoryDispatchOfferRepository : IDispatchOfferRepository
             if (existing.ExpiresAtUtc <= nowUtc)
                 return Task.FromResult(false);
 
-            // Förhindra att en annan offer redan accepterats för samma trip
             var tripAlreadyTaken = _store.Values.Any(o => o.TripId == existing.TripId && o.Status == "ACCEPTED");
             if (tripAlreadyTaken)
                 return Task.FromResult(false);
 
-            // Winner
             _store[offerId] = existing with { Status = "ACCEPTED" };
 
-            // Expire all other pending offers for the same trip
             foreach (var kv in _store)
             {
                 var o = kv.Value;

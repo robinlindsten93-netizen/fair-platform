@@ -9,11 +9,11 @@ public sealed class DispatchOfferExpiryService : BackgroundService
 {
     private readonly IDispatchOfferRepository _offers;
     private readonly ILogger<DispatchOfferExpiryService> _log;
-    private readonly DispatchOptions _opts;
+    private readonly DispatchWorkerOptions _opts;
 
     public DispatchOfferExpiryService(
         IDispatchOfferRepository offers,
-        IOptions<DispatchOptions> opts,
+        IOptions<DispatchWorkerOptions> opts,
         ILogger<DispatchOfferExpiryService> log)
     {
         _offers = offers;
@@ -24,20 +24,15 @@ public sealed class DispatchOfferExpiryService : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var delay = TimeSpan.FromSeconds(Math.Max(1, _opts.ExpireSweepSeconds));
-
         _log.LogInformation("DispatchOfferExpiryService started. sweep={SweepSeconds}s", delay.TotalSeconds);
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                var now = DateTimeOffset.UtcNow;
-                await _offers.ExpireOffersAsync(now, stoppingToken);
+                await _offers.ExpireOffersAsync(DateTimeOffset.UtcNow, stoppingToken);
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                // normal shutdown
-            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
             catch (Exception ex)
             {
                 _log.LogError(ex, "DispatchOfferExpiryService sweep failed");
@@ -47,10 +42,7 @@ public sealed class DispatchOfferExpiryService : BackgroundService
             {
                 await Task.Delay(delay, stoppingToken);
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                // normal shutdown
-            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
         }
 
         _log.LogInformation("DispatchOfferExpiryService stopped.");
