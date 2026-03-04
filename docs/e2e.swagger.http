@@ -1,106 +1,97 @@
-@baseUrl = https://localhost:5001
-# Byt till din faktiska baseUrl/port (http/https) som Swagger kör på.
-# Ex:
-# @baseUrl = http://localhost:5166
+@baseUrl = http://localhost:5001
+@riderPhone = +46700000001
+@driverPhone = +46700000002
+@otpCode = 123456
 
 ###
-# ================
+# =================
 # 0) OTP Rider
-# ================
+# =================
 POST {{baseUrl}}/api/v1/auth/otp/request
 Content-Type: application/json
 
 {
-  "phone": "+46700000001"
+  "phone": "{{riderPhone}}"
 }
 
 ###
-###
+# @name riderVerify
 POST {{baseUrl}}/api/v1/auth/otp/verify
 Content-Type: application/json
 
 {
-  "phone": "+46700000001",
-  "code": "123456"
+  "phone": "{{riderPhone}}",
+  "code": "{{otpCode}}"
 }
 
-> {% 
-  // Spara rider token
-  client.global.set("riderToken", response.body.access_token);
-
-  // 🔥 KRITISKT: spara userId (sub)
-  const payload = JSON.parse(atob(response.body.access_token.split('.')[1]));
-  client.global.set("riderUserId", payload.sub);
-%}
+###
+# @name riderMe
+GET {{baseUrl}}/api/v1/me
+Authorization: Bearer {{riderVerify.response.body.access_token}}
 
 ###
 # Grant Rider role (DEV)
+# OBS: Om /me inte returnerar "userId" utan t.ex. "id" eller "subject/sub"
+# ändra raden nedan till rätt property.
 POST {{baseUrl}}/api/v1/dev/roles/grant
-Authorization: Bearer {{riderToken}}
+Authorization: Bearer {{riderVerify.response.body.access_token}}
 Content-Type: application/json
 
 {
-  "userId": "{{riderUserId}}",
+  "userId": "{{riderMe.response.body.userId}}",
   "role": "Rider"
 }
 
-> {%
-  client.test("rider role granted", function () {
-    client.assert(response.status === 200);
-  });
-%}
-
 ###
 GET {{baseUrl}}/api/v1/me
-Authorization: Bearer {{riderToken}}
+Authorization: Bearer {{riderVerify.response.body.access_token}}
 
 ###
-# ================
+# =================
 # 1) OTP Driver
-# ================
+# =================
 POST {{baseUrl}}/api/v1/auth/otp/request
 Content-Type: application/json
 
 {
-  "phone": "+46700000002"
+  "phone": "{{driverPhone}}"
 }
 
 ###
+# @name driverVerify
 POST {{baseUrl}}/api/v1/auth/otp/verify
 Content-Type: application/json
 
 {
-  "phone": "+46700000002",
-  "code": "123456"
+  "phone": "{{driverPhone}}",
+  "code": "{{otpCode}}"
 }
 
-> {% 
-  client.global.set("driverToken", response.body.access_token);
-
-  const payload = JSON.parse(atob(response.body.access_token.split('.')[1]));
-  client.global.set("driverUserId", payload.sub);
-%}
+###
+# @name driverMe
+GET {{baseUrl}}/api/v1/me
+Authorization: Bearer {{driverVerify.response.body.access_token}}
 
 ###
 POST {{baseUrl}}/api/v1/dev/roles/grant
-Authorization: Bearer {{driverToken}}
+Authorization: Bearer {{driverVerify.response.body.access_token}}
 Content-Type: application/json
 
 {
-  "userId": "{{driverUserId}}",
+  "userId": "{{driverMe.response.body.userId}}",
   "role": "Driver"
 }
 
 ###
 GET {{baseUrl}}/api/v1/me
-Authorization: Bearer {{driverToken}}
+Authorization: Bearer {{driverVerify.response.body.access_token}}
 
 ###
-# ================
+# =================
 # 2) Driver online
-# ================
+# =================
 POST {{baseUrl}}/api/v1/driver/me/availability
-Authorization: Bearer {{driverToken}}
+Authorization: Bearer {{driverVerify.response.body.access_token}}
 Content-Type: application/json
 
 {
@@ -109,18 +100,19 @@ Content-Type: application/json
 
 ###
 GET {{baseUrl}}/api/v1/driver/me
-Authorization: Bearer {{driverToken}}
+Authorization: Bearer {{driverVerify.response.body.access_token}}
 
 ###
-# ================
+# =================
 # 3) Create Trip (Quoted)
-# ================
-# Om du har en endpoint som skapar QuoteToken: kör den här och spara quoteToken.
-# Annars: sätt quoteToken manuellt i variabeln nedan.
+# =================
+# Sätt en riktig quoteToken här:
 @quoteToken = PASTE_QUOTE_TOKEN_HERE
 
+###
+# @name createTrip
 POST {{baseUrl}}/api/v1/trips
-Authorization: Bearer {{riderToken}}
+Authorization: Bearer {{riderVerify.response.body.access_token}}
 Content-Type: application/json
 
 {
@@ -132,21 +124,16 @@ Content-Type: application/json
   "quoteToken": "{{quoteToken}}"
 }
 
-> {% 
-  // Spara tripId från create-responsen. Anpassa property om din DTO heter annorlunda.
-  client.global.set("tripId", response.body.tripId ?? response.body.id);
-%}
+###
+GET {{baseUrl}}/api/v1/trips/{{createTrip.response.body.tripId}}
+Authorization: Bearer {{riderVerify.response.body.access_token}}
 
 ###
-GET {{baseUrl}}/api/v1/trips/{{tripId}}
-Authorization: Bearer {{riderToken}}
-
-###
-# ================
+# =================
 # 4) Request Trip (dispatch kick)
-# ================
-POST {{baseUrl}}/api/v1/trips/{{tripId}}/request
-Authorization: Bearer {{riderToken}}
+# =================
+POST {{baseUrl}}/api/v1/trips/{{createTrip.response.body.tripId}}/request
+Authorization: Bearer {{riderVerify.response.body.access_token}}
 Content-Type: application/json
 
 {
@@ -154,77 +141,67 @@ Content-Type: application/json
 }
 
 ###
-# Rider active trip
 GET {{baseUrl}}/api/v1/trips/my/active
-Authorization: Bearer {{riderToken}}
+Authorization: Bearer {{riderVerify.response.body.access_token}}
 
 ###
-# ================
+# =================
 # 5) Driver offers
-# ================
-# Byt endpoint om din dispatch-controller har annan route.
+# =================
+# @name myOffers
 GET {{baseUrl}}/api/v1/dispatch/offers/my
-Authorization: Bearer {{driverToken}}
-
-> {%
-  // plocka första offerId
-  if (response.body && response.body.length > 0) {
-    client.global.set("offerId", response.body[0].offerId ?? response.body[0].id);
-  }
-%}
+Authorization: Bearer {{driverVerify.response.body.access_token}}
 
 ###
-# ================
-# 6) Accept offer (single winner) -> trip Accepted
-# ================
-# Byt endpoint om din accept-route heter annorlunda.
-POST {{baseUrl}}/api/v1/dispatch/offers/{{offerId}}/accept
-Authorization: Bearer {{driverToken}}
+# =================
+# 6) Accept offer -> trip Accepted
+# =================
+# OBS: Detta tar första offret i listan. Om din DTO heter annat än offerId, ändra.
+POST {{baseUrl}}/api/v1/dispatch/offers/{{myOffers.response.body[0].offerId}}/accept
+Authorization: Bearer {{driverVerify.response.body.access_token}}
 Content-Type: application/json
 
 {}
 
 ###
-# Driver active trip (should be Accepted)
 GET {{baseUrl}}/api/v1/trips/driver/my/active
-Authorization: Bearer {{driverToken}}
+Authorization: Bearer {{driverVerify.response.body.access_token}}
 
 ###
-# Rider active trip (should be Accepted)
 GET {{baseUrl}}/api/v1/trips/my/active
-Authorization: Bearer {{riderToken}}
+Authorization: Bearer {{riderVerify.response.body.access_token}}
 
 ###
-# ================
+# =================
 # 7) Lifecycle: Arrive -> Start -> Complete
-# ================
-POST {{baseUrl}}/api/v1/trips/{{tripId}}/arrive
-Authorization: Bearer {{driverToken}}
+# =================
+POST {{baseUrl}}/api/v1/trips/{{createTrip.response.body.tripId}}/arrive
+Authorization: Bearer {{driverVerify.response.body.access_token}}
 Content-Type: application/json
 
 {}
 
 ###
-POST {{baseUrl}}/api/v1/trips/{{tripId}}/start
-Authorization: Bearer {{driverToken}}
+POST {{baseUrl}}/api/v1/trips/{{createTrip.response.body.tripId}}/start
+Authorization: Bearer {{driverVerify.response.body.access_token}}
 Content-Type: application/json
 
 {}
 
 ###
-POST {{baseUrl}}/api/v1/trips/{{tripId}}/complete
-Authorization: Bearer {{driverToken}}
+POST {{baseUrl}}/api/v1/trips/{{createTrip.response.body.tripId}}/complete
+Authorization: Bearer {{driverVerify.response.body.access_token}}
 Content-Type: application/json
 
 {}
 
 ###
-# ================
+# =================
 # 8) Read models: history
-# ================
+# =================
 GET {{baseUrl}}/api/v1/trips/my
-Authorization: Bearer {{riderToken}}
+Authorization: Bearer {{riderVerify.response.body.access_token}}
 
 ###
 GET {{baseUrl}}/api/v1/trips/driver/my
-Authorization: Bearer {{driverToken}}
+Authorization: Bearer {{driverVerify.response.body.access_token}}

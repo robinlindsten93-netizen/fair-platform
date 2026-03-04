@@ -59,7 +59,12 @@ public sealed class CreateDispatchOffers
         var onlineSet = online is HashSet<Guid> hs ? hs : online.ToHashSet();
 
         var maxAge = TimeSpan.FromSeconds(_opt.LocationMaxAgeSeconds);
-        var candidates = await _locations.ListRecentAsync(maxAge, ct);
+        var candidates = await _locations.ListNearbyRecentAsync(
+        centerLat: trip.Pickup.Latitude,
+        centerLng: trip.Pickup.Longitude,
+        radiusMeters: _opt.MaxSearchRadiusMeters,
+        maxAge: maxAge,
+        ct: ct);
 
         var filtered = new List<(Guid DriverId, double DistMeters)>(candidates.Count);
 

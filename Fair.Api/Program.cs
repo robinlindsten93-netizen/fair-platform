@@ -1,6 +1,5 @@
 using Fair.Api.AuthZ;
 using Fair.Api.Swagger;
-using Fair.Application.Dispatch;
 using Fair.Application.Drivers;
 using Fair.Application.Me;
 using Fair.Application.Trips.AcceptTrip;
@@ -12,7 +11,6 @@ using Fair.Application.Trips.StartTrip;
 using Fair.Application.Trips.Queries.Active;
 using Fair.Domain.Auth;
 using Fair.Infrastructure;
-using Fair.Infrastructure.Dispatch; // 👈 worker options + expiry service
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics;
@@ -29,23 +27,13 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 
 // =========================
-// Infrastructure
+// Infrastructure (ALL wiring for repos/options/hosted workers)
 // =========================
 builder.Services.AddInfrastructure(builder.Configuration);
 
-// ✅ Application dispatch options (WAVES etc)
-builder.Services.Configure<Fair.Application.Dispatch.DispatchOptions>(
-    builder.Configuration.GetSection("Dispatch"));
-
-// ✅ Worker options (expiry sweep)
-builder.Services.Configure<DispatchWorkerOptions>(
-    builder.Configuration.GetSection("DispatchWorker"));
-
-// ✅ Background expiry worker
-builder.Services.AddHostedService<DispatchOfferExpiryService>();
-
 // =========================
-// Handlers / Use cases
+// Application handlers / use cases
+// (du kan senare flytta detta till en AddApplication() om du vill)
 // =========================
 builder.Services.AddScoped<CreateTripHandler>();
 builder.Services.AddScoped<RequestTripHandler>();
@@ -56,11 +44,6 @@ builder.Services.AddScoped<CompleteTripHandler>();
 
 builder.Services.AddScoped<GetMyTrips>();
 builder.Services.AddScoped<GetMyActiveTrip>();
-
-// 🔥 DISPATCH
-builder.Services.AddScoped<GetMyOffers>();
-builder.Services.AddScoped<AcceptDispatchOffer>();
-builder.Services.AddScoped<CreateDispatchOffers>();
 
 // Identity
 builder.Services.AddScoped<GetMe>();
@@ -146,7 +129,7 @@ builder.Services
     });
 
 // =========================
-// Authorization
+// Authorization (repo-baserad)
 // =========================
 builder.Services.AddAuthorization(options =>
 {

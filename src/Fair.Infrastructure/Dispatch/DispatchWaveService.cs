@@ -1,45 +1,64 @@
 using Fair.Application.Dispatch;
-using Fair.Application.Drivers;
-using Fair.Application.Trips;
-using Fair.Domain.Trips;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Fair.Infrastructure.Dispatch;
 
 public sealed class DispatchWaveService : BackgroundService
 {
     private readonly DispatchWaveQueue _queue;
-    private readonly CreateDispatchOffers _create; // vi återanvänder use case
-    private readonly ITripRepository _trips;
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ILogger<DispatchWaveService> _log;
 
     public DispatchWaveService(
         DispatchWaveQueue queue,
-        CreateDispatchOffers create,
-        ITripRepository trips)
+        IServiceScopeFactory scopeFactory,
+        ILogger<DispatchWaveService> log)
     {
         _queue = queue;
-        _create = create;
-        _trips = trips;
+        _scopeFactory = scopeFactory;
+        _log = log;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _log.LogInformation("DispatchWaveService started.");
+
         while (!stoppingToken.IsCancellationRequested)
         {
-            var now = DateTimeOffset.UtcNow;
+            DispatchWaveQueue.Job job;
 
-            if (_queue.TryTakeDue(now, out var job))
+            try
             {
-                // Om trip redan inte är Requested -> inga fler waves
-                var trip = await _trips.GetByIdAsync(job.TripId, stoppingToken);
-                if (trip is null || trip.Status != TripStatus.Requested)
-                    continue;
-
-                // Kör "wave dispatch" igen (use case är idempotent per version, men vi gör waves via offered-driver set)
-                await _create.Handle(job.TripId, job.TripVersion, stoppingToken);
+                job = await _queue.DequeueAsync(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
             }
 
-            await Task.Delay(250, stoppingToken);
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var uc = scope.ServiceProvider.GetRequiredService<CreateDispatchOffers>();
+
+                await uc.Handle(job.TripId, job.TripVersion, stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(
+                    ex,
+                    "DispatchWaveService job failed. tripId={TripId} version={TripVersion}",
+                    job.TripId,
+                    job.TripVersion);
+            }
         }
+
+        _log.LogInformation("DispatchWaveService stopped.");
     }
 }
