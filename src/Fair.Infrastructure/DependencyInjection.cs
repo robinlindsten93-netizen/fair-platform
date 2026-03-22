@@ -51,7 +51,7 @@ public static class DependencyInjection
             sp.GetRequiredService<InMemoryDriverProfileRepository>());
 
         // =========================
-        // Driver locations (DISPATCH) — SINGLETON SHARED
+        // Driver locations (DISPATCH)
         // =========================
         services.AddSingleton<InMemoryDriverLocationRepository>();
 
@@ -67,15 +67,15 @@ public static class DependencyInjection
         services.AddSingleton<ITripRepository, InMemoryTripRepository>();
         services.AddSingleton<ITripReadRepository, InMemoryTripReadRepository>();
 
-        // Guards (Application)
+        // Guards
         services.AddScoped<ActiveTripGuard>();
 
         // =========================
-        // Dispatch options (Application)
+        // Dispatch options
         // =========================
         var dispatchOpt = new Fair.Application.Dispatch.DispatchOptions();
         config.GetSection("Dispatch").Bind(dispatchOpt);
-        services.AddSingleton(dispatchOpt); // registers as DispatchOptions (Application)
+        services.AddSingleton(dispatchOpt);
 
         // =========================
         // Dispatch storage
@@ -83,11 +83,20 @@ public static class DependencyInjection
         services.AddSingleton<IDispatchOfferRepository, InMemoryDispatchOfferRepository>();
         services.AddSingleton<IDriverAssignmentRepository, InMemoryDriverAssignmentRepository>();
 
+        // =========================
+        // ✅ SignalR Notifier (NEW)
+        // =========================
+        
+
+        // =========================
         // Wave queue + worker
+        // =========================
         services.AddSingleton<DispatchWaveQueue>();
         services.AddHostedService<DispatchWaveService>();
 
+        // =========================
         // Dispatch use cases
+        // =========================
         services.AddScoped<CreateDispatchOffers>();
         services.AddScoped<GetMyOffers>();
         services.AddScoped<AcceptDispatchOffer>();

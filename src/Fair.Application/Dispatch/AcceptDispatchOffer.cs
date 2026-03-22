@@ -9,18 +9,118 @@ public sealed class AcceptDispatchOffer
     private readonly IDispatchOfferRepository _offers;
     private readonly ITripRepository _trips;
     private readonly IDriverAssignmentRepository _assignments;
+    private readonly ITripNotifier _tripNotifier;
 
     public AcceptDispatchOffer(
         IDispatchOfferRepository offers,
         ITripRepository trips,
-        IDriverAssignmentRepository assignments)
+        IDriverAssignmentRepository assignments,
+        ITripNotifier tripNotifier)
     {
         _offers = offers;
         _trips = trips;
         _assignments = assignments;
+        _tripNotifier = tripNotifier;
     }
 
     public async Task<bool> Handle(ClaimsPrincipal user, Guid offerId, CancellationToken ct)
+    {
+        var driverId = GetDriverIdOrThrow(user);
+        var now = DateTimeOffset.UtcNow;
+
+        var offer = await _offers.GetByIdAsync(offerId, ct);
+        if (offer is null)
+            return false;
+
+        var trip = await _trips.GetByIdAsync(offer.TripId, ct);
+        if (trip is null)
+            return false;
+
+        if (trip.Status == TripStatus.Accepted && trip.DriverId == driverId)
+            return true;
+
+        if (trip.Status != TripStatus.Requested)
+            return false;
+
+        if (trip.Version != offer.TripVersion)
+            return false;
+
+        var assign = await _assignments.TryAssignAsync(driverId, offer.TripId, ct);
+        if (assign == DriverAssignResult.AlreadyAssignedOtherTrip)
+            return false;
+
+        try
+        {
+            var accepted = await _offers.TryAcceptAsync(offerId, driverId, now, ct);
+            if (!accepted)
+            {
+                if (await IsAlreadyAcceptedByMeAsync(driverId, offerId, offer.TripId, ct))
+                    return true;
+
+                await _assignments.ReleaseAsync(driverId, offer.TripId, ct);
+                return false;
+            }
+
+            var expectedVersion = trip.Version;
+            var vehicleId = "DEV_VEHICLE";
+
+            trip.Accept(driverId, vehicleId, now);
+
+            var updated = await _trips.UpdateAsync(trip, expectedVersion, ct);
+            if (!updated)
+            {
+                var latestTrip = await _trips.GetByIdAsync(offer.TripId, ct);
+                var alreadyAcceptedByMe =
+                    latestTrip is not null &&
+                    latestTrip.Status == TripStatus.Accepted &&
+                    latestTrip.DriverId == driverId;
+
+                if (alreadyAcceptedByMe)
+                    return true;
+
+                await _assignments.ReleaseAsync(driverId, offer.TripId, ct);
+                return false;
+            }
+
+            var payload = new
+            {
+                tripId = trip.Id,
+                riderId = trip.RiderId,
+                driverId,
+                status = trip.Status.ToString(),
+                changedAtUtc = now
+            };
+
+            await _tripNotifier.NotifyRiderTripStatusChanged(trip.RiderId, payload, ct);
+            await _tripNotifier.NotifyDriverTripStatusChanged(driverId, payload, ct);
+
+            return true;
+        }
+        catch
+        {
+            await _assignments.ReleaseAsync(driverId, offer.TripId, ct);
+            throw;
+        }
+    }
+
+    private async Task<bool> IsAlreadyAcceptedByMeAsync(
+        Guid driverId,
+        Guid offerId,
+        Guid tripId,
+        CancellationToken ct)
+    {
+        var latestOffer = await _offers.GetByIdAsync(offerId, ct);
+        var latestTrip = await _trips.GetByIdAsync(tripId, ct);
+
+        return latestOffer is not null &&
+               latestTrip is not null &&
+               latestOffer.DriverId == driverId &&
+               latestOffer.Status == "ACCEPTED" &&
+               latestTrip.Status == TripStatus.Accepted &&
+               latestTrip.DriverId == driverId;
+    }
+
+    private static Guid GetDriverIdOrThrow(ClaimsPrincipal user)
     {
         var sub =
             user.FindFirst("sub")?.Value ??
@@ -30,83 +130,6 @@ public sealed class AcceptDispatchOffer
         if (!Guid.TryParse(sub, out var driverId) || driverId == Guid.Empty)
             throw new InvalidOperationException("Invalid user id claim (expected Guid).");
 
-        var now = DateTimeOffset.UtcNow;
-
-        // 1) Läs offer
-        var offer = await _offers.GetByIdAsync(offerId, ct);
-        if (offer is null) return false;
-
-        // 2) Läs trip (för status + version + idempotens)
-        var trip = await _trips.GetByIdAsync(offer.TripId, ct);
-        if (trip is null) return false;
-
-        // ✅ Idempotens: trip redan accepterad av samma driver -> OK
-        if (trip.Status == TripStatus.Accepted && trip.DriverId == driverId)
-            return true;
-
-        // Trip måste vara Requested för att accepteras
-        if (trip.Status != TripStatus.Requested)
-            return false;
-
-        // ✅ Hardening: offer får inte vara stale (skapad för annan tripVersion)
-        if (trip.Version != offer.TripVersion)
-            return false;
-
-        // 3) Busy-skydd (driver kan inte ta två trips samtidigt)
-        var assign = await _assignments.TryAssignAsync(driverId, offer.TripId, ct);
-        if (assign == DriverAssignResult.AlreadyAssignedOtherTrip)
-            return false;
-
-        // 4) Atomic accept i offer-store (single-winner)
-        var accepted = await _offers.TryAcceptAsync(offerId, driverId, now, ct);
-        if (!accepted)
-        {
-            // ✅ Idempotens: om vi redan accepterat tidigare -> return true
-            var latestOffer = await _offers.GetByIdAsync(offerId, ct);
-            var latestTrip = await _trips.GetByIdAsync(offer.TripId, ct);
-
-            var weAlreadyWon =
-                latestOffer is not null &&
-                latestOffer.DriverId == driverId &&
-                latestOffer.Status == "ACCEPTED" &&
-                latestTrip is not null &&
-                latestTrip.Status == TripStatus.Accepted &&
-                latestTrip.DriverId == driverId;
-
-            if (weAlreadyWon)
-                return true;
-
-            await _assignments.ReleaseAsync(driverId, offer.TripId, ct);
-            return false;
-        }
-
-        // 5) Uppdatera trip med optimistic concurrency
-        // (använd versionen från trip vi läste innan vi gjorde transition)
-        var expectedVersion = trip.Version;
-
-        // v1 placeholder tills vi har vehicles kopplade till driver/fleet
-        var vehicleId = "DEV_VEHICLE";
-
-        trip.Accept(driverId, vehicleId, now);
-
-        var ok = await _trips.UpdateAsync(trip, expectedVersion, ct);
-        if (!ok)
-        {
-            // ✅ Om någon hann acceptera (ev vi själva via race) -> kolla idempotent fallback
-            var latestTrip = await _trips.GetByIdAsync(offer.TripId, ct);
-
-            var alreadyAcceptedByMe =
-                latestTrip is not null &&
-                latestTrip.Status == TripStatus.Accepted &&
-                latestTrip.DriverId == driverId;
-
-            if (alreadyAcceptedByMe)
-                return true;
-
-            await _assignments.ReleaseAsync(driverId, offer.TripId, ct);
-            return false;
-        }
-
-        return true;
+        return driverId;
     }
 }

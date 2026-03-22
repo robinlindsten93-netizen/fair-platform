@@ -23,25 +23,37 @@ public sealed class InMemoryDispatchOfferRepository : IDispatchOfferRepository
         foreach (var o in offers)
         {
             _store.TryAdd(o.OfferId, new Offer(
-                o.OfferId, o.TripId, o.DriverId, o.TripVersion,
-                o.CreatedAtUtc, o.ExpiresAtUtc, o.Status
+                o.OfferId,
+                o.TripId,
+                o.DriverId,
+                o.TripVersion,
+                o.CreatedAtUtc,
+                o.ExpiresAtUtc,
+                o.Status
             ));
         }
+
         return Task.CompletedTask;
     }
 
-    public Task<IReadOnlyList<DispatchOfferDto>> GetPendingOffersForDriverAsync(Guid driverId, DateTimeOffset nowUtc, CancellationToken ct)
+    public Task<IReadOnlyList<DispatchOfferDto>> GetPendingOffersForDriverAsync(
+        Guid driverId,
+        DateTimeOffset nowUtc,
+        CancellationToken ct)
     {
         ExpireInternal(nowUtc);
 
-        var list = _store.Values
-            .Where(o => o.DriverId == driverId && o.Status == "PENDING" && o.ExpiresAtUtc > nowUtc)
+        var result = _store.Values
+            .Where(o =>
+                o.DriverId == driverId &&
+                o.Status == "PENDING" &&
+                o.ExpiresAtUtc > nowUtc)
             .OrderBy(o => o.CreatedAtUtc)
             .Select(ToDto)
             .ToList()
             .AsReadOnly();
 
-        return Task.FromResult<IReadOnlyList<DispatchOfferDto>>(list);
+        return Task.FromResult<IReadOnlyList<DispatchOfferDto>>(result);
     }
 
     public Task<DispatchOfferDto?> GetByIdAsync(Guid offerId, CancellationToken ct)
@@ -54,14 +66,19 @@ public sealed class InMemoryDispatchOfferRepository : IDispatchOfferRepository
 
     public Task<bool> ExistsForTripVersionAsync(Guid tripId, int tripVersion, CancellationToken ct)
     {
-        var exists = _store.Values.Any(o => o.TripId == tripId && o.TripVersion == tripVersion);
+        var exists = _store.Values.Any(o =>
+            o.TripId == tripId &&
+            o.TripVersion == tripVersion);
+
         return Task.FromResult(exists);
     }
 
     public Task<IReadOnlySet<Guid>> GetOfferedDriverIdsAsync(Guid tripId, int tripVersion, CancellationToken ct)
     {
         var set = _store.Values
-            .Where(o => o.TripId == tripId && o.TripVersion == tripVersion)
+            .Where(o =>
+                o.TripId == tripId &&
+                o.TripVersion == tripVersion)
             .Select(o => o.DriverId)
             .ToHashSet();
 
@@ -79,6 +96,7 @@ public sealed class InMemoryDispatchOfferRepository : IDispatchOfferRepository
 
         lock (gate)
         {
+            // Re-read inside lock (critical)
             if (!_store.TryGetValue(offerId, out existing))
                 return Task.FromResult(false);
 
@@ -91,18 +109,30 @@ public sealed class InMemoryDispatchOfferRepository : IDispatchOfferRepository
             if (existing.ExpiresAtUtc <= nowUtc)
                 return Task.FromResult(false);
 
-            var tripAlreadyTaken = _store.Values.Any(o => o.TripId == existing.TripId && o.Status == "ACCEPTED");
-            if (tripAlreadyTaken)
+            // Snapshot only THIS trip's offers (avoid scanning entire store repeatedly)
+            var tripOffers = _store.Values
+                .Where(o => o.TripId == existing.TripId)
+                .ToList();
+
+            // Already accepted?
+            if (tripOffers.Any(o => o.Status == "ACCEPTED"))
                 return Task.FromResult(false);
 
+            // Accept this offer
             _store[offerId] = existing with { Status = "ACCEPTED" };
 
-            foreach (var kv in _store)
+            // Expire all others for this trip
+            foreach (var o in tripOffers)
             {
-                var o = kv.Value;
-                if (o.TripId == existing.TripId && o.OfferId != offerId && o.Status == "PENDING")
+                if (o.OfferId == offerId)
+                    continue;
+
+                if (o.Status == "PENDING")
                 {
-                    _store.TryUpdate(kv.Key, o with { Status = "EXPIRED" }, o);
+                    _store.TryUpdate(
+                        o.OfferId,
+                        o with { Status = "EXPIRED" },
+                        o);
                 }
             }
 
@@ -121,9 +151,13 @@ public sealed class InMemoryDispatchOfferRepository : IDispatchOfferRepository
         foreach (var kv in _store)
         {
             var o = kv.Value;
+
             if (o.Status == "PENDING" && o.ExpiresAtUtc <= nowUtc)
             {
-                _store.TryUpdate(kv.Key, o with { Status = "EXPIRED" }, o);
+                _store.TryUpdate(
+                    kv.Key,
+                    o with { Status = "EXPIRED" },
+                    o);
             }
         }
     }

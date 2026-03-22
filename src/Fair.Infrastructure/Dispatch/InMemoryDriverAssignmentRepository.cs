@@ -6,34 +6,52 @@ namespace Fair.Infrastructure.Dispatch;
 public sealed class InMemoryDriverAssignmentRepository : IDriverAssignmentRepository
 {
     // driverId -> tripId
-    private readonly ConcurrentDictionary<Guid, Guid> _byDriver = new();
+    private readonly ConcurrentDictionary<Guid, Guid> _assignments = new();
+
+    // driverId -> last time driver became free
+    private readonly ConcurrentDictionary<Guid, DateTimeOffset> _lastFree = new();
 
     public Task<DriverAssignResult> TryAssignAsync(Guid driverId, Guid tripId, CancellationToken ct)
     {
-        // Om driver redan assigned till samma trip -> idempotent ok
-        if (_byDriver.TryGetValue(driverId, out var existing) && existing == tripId)
-            return Task.FromResult(DriverAssignResult.Assigned);
+        if (_assignments.TryGetValue(driverId, out var existingTripId))
+        {
+            if (existingTripId == tripId)
+                return Task.FromResult(DriverAssignResult.AlreadyAssignedSameTrip);
 
-        // Om driver assigned till annan trip -> fail
-        if (_byDriver.TryGetValue(driverId, out existing) && existing != tripId)
+            return Task.FromResult(DriverAssignResult.AlreadyAssignedOtherTrip);
+        }
+
+        var added = _assignments.TryAdd(driverId, tripId);
+        if (!added)
             return Task.FromResult(DriverAssignResult.AlreadyAssignedOtherTrip);
 
-        // Försök assign
-        var ok = _byDriver.TryAdd(driverId, tripId);
-        return Task.FromResult(ok ? DriverAssignResult.Assigned : DriverAssignResult.AlreadyAssignedOtherTrip);
+        return Task.FromResult(DriverAssignResult.Assigned);
     }
 
     public Task ReleaseAsync(Guid driverId, Guid tripId, CancellationToken ct)
     {
-        // släpp bara om den pekar på tripId (säker release)
-        if (_byDriver.TryGetValue(driverId, out var existing) && existing == tripId)
-            _byDriver.TryRemove(driverId, out _);
+        if (_assignments.TryGetValue(driverId, out var existingTripId) && existingTripId == tripId)
+        {
+            _assignments.TryRemove(driverId, out _);
+
+            // mark driver as free now
+            _lastFree[driverId] = DateTimeOffset.UtcNow;
+        }
 
         return Task.CompletedTask;
     }
 
-    public Task<Guid?> GetAssignedTripIdAsync(Guid driverId, CancellationToken ct)
+    public Task<bool> IsBusyAsync(Guid driverId, CancellationToken ct)
     {
-        return Task.FromResult(_byDriver.TryGetValue(driverId, out var tripId) ? (Guid?)tripId : null);
+        return Task.FromResult(_assignments.ContainsKey(driverId));
+    }
+
+    // NEW
+    public Task<DateTimeOffset?> GetLastFreeAtAsync(Guid driverId, CancellationToken ct)
+    {
+        if (_lastFree.TryGetValue(driverId, out var ts))
+            return Task.FromResult<DateTimeOffset?>(ts);
+
+        return Task.FromResult<DateTimeOffset?>(null);
     }
 }

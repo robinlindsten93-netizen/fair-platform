@@ -1,5 +1,8 @@
 using Fair.Api.AuthZ;
+using Fair.Api.Hubs;
+using Fair.Api.Realtime;
 using Fair.Api.Swagger;
+using Fair.Application.Dispatch;
 using Fair.Application.Drivers;
 using Fair.Application.Me;
 using Fair.Application.Trips.AcceptTrip;
@@ -20,6 +23,7 @@ using Microsoft.OpenApi.Models;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using Fair.Application.Trips;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -27,13 +31,17 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 
 // =========================
-// Infrastructure (ALL wiring for repos/options/hosted workers)
+// SignalR
+// =========================
+builder.Services.AddSignalR();
+
+// =========================
+// Infrastructure
 // =========================
 builder.Services.AddInfrastructure(builder.Configuration);
 
 // =========================
-// Application handlers / use cases
-// (du kan senare flytta detta till en AddApplication() om du vill)
+// Application handlers
 // =========================
 builder.Services.AddScoped<CreateTripHandler>();
 builder.Services.AddScoped<RequestTripHandler>();
@@ -51,6 +59,12 @@ builder.Services.AddScoped<GetMe>();
 // Driver availability
 builder.Services.AddScoped<GetDriverMe>();
 builder.Services.AddScoped<SetDriverAvailability>();
+
+// =========================
+// Realtime notifiers
+// =========================
+builder.Services.AddSingleton<IDispatchNotifier, SignalRDispatchNotifier>();
+builder.Services.AddSingleton<ITripNotifier, SignalRTripNotifier>();
 
 // =========================
 // Swagger
@@ -88,7 +102,7 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 // =========================
-// CORS (dev only)
+// CORS
 // =========================
 builder.Services.AddCors(options =>
 {
@@ -129,7 +143,7 @@ builder.Services
     });
 
 // =========================
-// Authorization (repo-baserad)
+// Authorization
 // =========================
 builder.Services.AddAuthorization(options =>
 {
@@ -151,7 +165,7 @@ builder.Services.AddSingleton<IAuthorizationHandler, RoleAuthorizationHandler>()
 var app = builder.Build();
 
 // =========================
-// Errors -> ProblemDetails
+// Errors
 // =========================
 app.UseExceptionHandler(errorApp =>
 {
@@ -186,5 +200,7 @@ if (app.Environment.IsDevelopment())
 app.UseAuthentication();
 app.UseAuthorization();
 
+app.MapHub<DispatchHub>("/hubs/dispatch");
 app.MapControllers();
+
 app.Run();

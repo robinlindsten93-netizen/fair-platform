@@ -9,31 +9,13 @@ public enum DriverAssignResult
 
 public interface IDriverAssignmentRepository
 {
-    /// <summary>
-    /// Try to assign driver to trip.
-    /// Must be atomic.
-    /// </summary>
-    Task<DriverAssignResult> TryAssignAsync(
-        Guid driverId,
-        Guid tripId,
-        CancellationToken ct);
+    Task<DriverAssignResult> TryAssignAsync(Guid driverId, Guid tripId, CancellationToken ct);
 
-    /// <summary>
-    /// Release driver from trip (best-effort).
-    /// </summary>
-    Task ReleaseAsync(
-        Guid driverId,
-        Guid tripId,
-        CancellationToken ct);
+    Task ReleaseAsync(Guid driverId, Guid tripId, CancellationToken ct);
 
-    // =========================
-    // 🔥 NEW — required for guards & read models
-    // =========================
-    /// <summary>
-    /// Returns the currently assigned trip for driver, if any.
-    /// Used by guards and active trip queries.
-    /// </summary>
-    Task<Guid?> GetAssignedTripIdAsync(
-        Guid driverId,
-        CancellationToken ct);
+    // används i dispatch för att filtrera bort upptagna drivers
+    Task<bool> IsBusyAsync(Guid driverId, CancellationToken ct);
+
+    // NEW: fairness (idle time)
+    Task<DateTimeOffset?> GetLastFreeAtAsync(Guid driverId, CancellationToken ct);
 }

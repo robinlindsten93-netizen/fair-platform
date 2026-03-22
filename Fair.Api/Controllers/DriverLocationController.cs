@@ -1,3 +1,4 @@
+using Fair.Api.Contracts.Driver;
 using Fair.Application.Drivers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -17,23 +18,23 @@ public sealed class DriverLocationController : ControllerBase
         _writer = writer;
     }
 
-    public sealed record Body(double Lat, double Lng);
-
     [HttpPost]
-    public async Task<IActionResult> Upsert([FromBody] Body body, CancellationToken ct)
+    public async Task<IActionResult> UpdateLocation(
+        [FromBody] UpdateDriverLocationRequest req,
+        CancellationToken ct)
     {
         var sub =
-            User.FindFirstValue("sub") ??
-            User.FindFirstValue(ClaimTypes.NameIdentifier);
+            User.FindFirstValue(ClaimTypes.NameIdentifier) ??
+            User.FindFirstValue("sub");
 
         if (!Guid.TryParse(sub, out var driverId))
             return Unauthorized();
 
         var location = new DriverLocationDto(
-            driverId,
-            body.Lat,
-            body.Lng,
-            DateTimeOffset.UtcNow
+            DriverId: driverId,
+            Lat: req.Lat,
+            Lng: req.Lng,
+            RecordedAtUtc: DateTimeOffset.UtcNow
         );
 
         await _writer.UpsertAsync(location, ct);

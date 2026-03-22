@@ -1,39 +1,49 @@
-using Fair.Application.Trips;
 using Fair.Domain.Trips;
 
 namespace Fair.Application.Trips.StartTrip;
 
 public sealed class StartTripHandler
 {
-    private readonly ITripRepository _repo;
+    private readonly ITripRepository _trips;
+    private readonly ITripNotifier _tripNotifier;
 
-    public StartTripHandler(ITripRepository repo)
+    public StartTripHandler(
+        ITripRepository trips,
+        ITripNotifier tripNotifier)
     {
-        _repo = repo;
+        _trips = trips;
+        _tripNotifier = tripNotifier;
     }
 
-    public async Task<StartTripResult> HandleAsync(
-        StartTripRequest request,
-        CancellationToken ct = default)
+    public async Task<StartTripResult> HandleAsync(StartTripRequest req, CancellationToken ct)
     {
-        if (request.TripId == Guid.Empty)
-            throw new ArgumentException("TripId is required.", nameof(request.TripId));
-
-        var trip = await _repo.GetByIdAsync(request.TripId, ct);
+        var trip = await _trips.GetByIdAsync(req.TripId, ct);
         if (trip is null)
             throw new KeyNotFoundException("trip_not_found");
 
-        // Idempotens: redan startad eller klar → returnera nuvarande status
-        if (trip.Status is TripStatus.InProgress or TripStatus.Completed)
-            return new StartTripResult(trip.Id, trip.Status);
+        var expectedVersion = trip.Version;
+        var now = DateTimeOffset.UtcNow;
 
-        // Domain rule: måste vara Accepted eller Arriving
-        trip.Start(DateTimeOffset.UtcNow);
+        trip.Start(now);
 
-        // Optimistic concurrency
-        var ok = await _repo.UpdateAsync(trip, trip.Version, ct);
-        if (!ok)
+        var updated = await _trips.UpdateAsync(trip, expectedVersion, ct);
+        if (!updated)
             throw new InvalidOperationException("concurrency_conflict");
+
+        if (trip.DriverId.HasValue)
+        {
+            var payload = new
+            {
+                tripId = trip.Id,
+                riderId = trip.RiderId,
+                driverId = trip.DriverId.Value,
+                status = trip.Status.ToString(),
+                changedAtUtc = now
+            };
+
+            await _tripNotifier.NotifyRiderTripStatusChanged(trip.RiderId, payload, ct);
+            await _tripNotifier.NotifyDriverTripStatusChanged(trip.DriverId.Value, payload, ct);
+        }
 
         return new StartTripResult(trip.Id, trip.Status);
     }

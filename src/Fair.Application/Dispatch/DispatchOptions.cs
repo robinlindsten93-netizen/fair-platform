@@ -7,7 +7,7 @@ public sealed class DispatchOptions
 
     public int MaxSearchRadiusMeters { get; init; } = 6000; // 6 km
     public int LocationMaxAgeSeconds { get; init; } = 45;   // “färsk position”
-    public int OfferTtlSeconds { get; init; } = 20;
+    public int OfferTtlSeconds { get; init; } = 60;
 
     // =========================
     // WAVES (NEW)
