@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 const API_BASE = "http://localhost:5001";
 
@@ -41,50 +41,159 @@ const preStyle = {
   maxHeight: 180
 };
 
+const badgeStyle = (active) => ({
+  display: "inline-block",
+  padding: "4px 10px",
+  borderRadius: 999,
+  fontSize: 12,
+  fontWeight: 700,
+  background: active ? "#dcfce7" : "#e2e8f0",
+  color: active ? "#166534" : "#475569",
+  marginRight: 8,
+  marginBottom: 8
+});
+
+const statusBoxStyle = {
+  background: "#f8fafc",
+  border: "1px solid #e2e8f0",
+  borderRadius: 10,
+  padding: 12,
+  marginTop: 16,
+  fontSize: 14,
+  lineHeight: 1.5
+};
+
+const hintStyle = (ok) => ({
+  color: ok ? "#166534" : "#b45309",
+  fontWeight: 600
+});
+
 export default function App() {
-  // =========================
-  // RIDER AUTH
-  // =========================
+  // RIDER
   const [phone, setPhone] = useState("+46700000001");
   const [code, setCode] = useState("123456");
   const [token, setToken] = useState("");
   const [me, setMe] = useState(null);
 
-  // =========================
-  // DRIVER AUTH
-  // =========================
+  // DRIVER
   const [driverPhone, setDriverPhone] = useState("+46700000002");
   const [driverCode, setDriverCode] = useState("123456");
   const [driverToken, setDriverToken] = useState("");
   const [driverMe, setDriverMe] = useState(null);
 
-  // =========================
-  // SHARED UI
-  // =========================
+  // SHARED
   const [result, setResult] = useState("Inte testat ännu");
   const [loading, setLoading] = useState(false);
 
-  // =========================
   // RIDER TRIP DATA
-  // =========================
   const [pickupLat, setPickupLat] = useState("59.3293");
   const [pickupLng, setPickupLng] = useState("18.0686");
   const [dropoffLat, setDropoffLat] = useState("59.3493");
   const [dropoffLng, setDropoffLng] = useState("18.0986");
-
   const [quoteToken, setQuoteToken] = useState("");
   const [tripId, setTripId] = useState("");
+  const [activeTrip, setActiveTrip] = useState(null);
 
-  // =========================
   // DRIVER DATA
-  // =========================
   const [driverLat, setDriverLat] = useState("59.3293");
   const [driverLng, setDriverLng] = useState("18.0686");
   const [offers, setOffers] = useState([]);
   const [selectedOfferId, setSelectedOfferId] = useState("");
 
+  const riderHasRole = useMemo(
+    () => Array.isArray(me?.roles) && me.roles.includes("RIDER"),
+    [me]
+  );
+
+  const driverHasRole = useMemo(
+    () => Array.isArray(driverMe?.roles) && driverMe.roles.includes("DRIVER"),
+    [driverMe]
+  );
+
+  async function readText(res) {
+    return await res.text();
+  }
+
+  async function readJsonSafe(res) {
+    const text = await res.text();
+    if (!text) return { text: "", data: null };
+
+    try {
+      return { text, data: JSON.parse(text) };
+    } catch {
+      return { text, data: null };
+    }
+  }
+
+  function resetTripFlow() {
+    setQuoteToken("");
+    setTripId("");
+    setActiveTrip(null);
+  }
+
   // =========================
-  // RIDER AUTH FUNCTIONS
+  // SESSION REFRESH HELPERS
+  // =========================
+  async function refreshRiderSession() {
+    const verifyRes = await fetch(`${API_BASE}/api/v1/auth/otp/verify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone, code })
+    });
+
+    const { data: verifyData } = await readJsonSafe(verifyRes);
+    const newToken = verifyData?.access_token ?? "";
+
+    if (!verifyRes.ok || !newToken) {
+      throw new Error("Rider OTP verify misslyckades vid session refresh.");
+    }
+
+    setToken(newToken);
+
+    const meRes = await fetch(`${API_BASE}/api/v1/me`, {
+      headers: { Authorization: `Bearer ${newToken}` }
+    });
+
+    const { data: meData, text: meText } = await readJsonSafe(meRes);
+    if (!meRes.ok || !meData) {
+      throw new Error(`Rider /me misslyckades vid session refresh.\n${meText}`);
+    }
+
+    setMe(meData);
+    return { token: newToken, me: meData };
+  }
+
+  async function refreshDriverSession() {
+    const verifyRes = await fetch(`${API_BASE}/api/v1/auth/otp/verify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone: driverPhone, code: driverCode })
+    });
+
+    const { data: verifyData } = await readJsonSafe(verifyRes);
+    const newToken = verifyData?.access_token ?? "";
+
+    if (!verifyRes.ok || !newToken) {
+      throw new Error("Driver OTP verify misslyckades vid session refresh.");
+    }
+
+    setDriverToken(newToken);
+
+    const meRes = await fetch(`${API_BASE}/api/v1/me`, {
+      headers: { Authorization: `Bearer ${newToken}` }
+    });
+
+    const { data: meData, text: meText } = await readJsonSafe(meRes);
+    if (!meRes.ok || !meData) {
+      throw new Error(`Driver /me misslyckades vid session refresh.\n${meText}`);
+    }
+
+    setDriverMe(meData);
+    return { token: newToken, me: meData };
+  }
+
+  // =========================
+  // RIDER AUTH
   // =========================
   async function otpRequest() {
     setLoading(true);
@@ -97,7 +206,7 @@ export default function App() {
         body: JSON.stringify({ phone })
       });
 
-      const text = await res.text();
+      const text = await readText(res);
       setResult(`Rider OTP request status: ${res.status}\n\n${text}`);
     } catch (err) {
       setResult(`ERROR: ${err.message}`);
@@ -111,15 +220,8 @@ export default function App() {
     setResult("Verifierar Rider OTP...");
 
     try {
-      const res = await fetch(`${API_BASE}/api/v1/auth/otp/verify`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone, code })
-      });
-
-      const data = await res.json();
-      setToken(data.access_token ?? "");
-      setResult(`Rider OTP verify status: ${res.status}\n\nToken sparad.`);
+      const refreshed = await refreshRiderSession();
+      setResult(`Rider OTP verify status: 200\n\nRider-token sparad.\n\nToken prefix: ${refreshed.token.slice(0, 40)}...`);
     } catch (err) {
       setResult(`ERROR: ${err.message}`);
     } finally {
@@ -133,20 +235,17 @@ export default function App() {
 
     try {
       const res = await fetch(`${API_BASE}/api/v1/me`, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
+        headers: { Authorization: `Bearer ${token}` }
       });
 
-      const text = await res.text();
-
-      try {
-        setMe(JSON.parse(text));
-      } catch {
+      const { data, text } = await readJsonSafe(res);
+      if (data) {
+        setMe(data);
+        setResult(`Rider GET /me status: ${res.status}\n\n${JSON.stringify(data, null, 2)}`);
+      } else {
         setMe(null);
+        setResult(`Rider GET /me status: ${res.status}\n\n${text}`);
       }
-
-      setResult(`Rider GET /me status: ${res.status}\n\n${text}`);
     } catch (err) {
       setResult(`ERROR: ${err.message}`);
     } finally {
@@ -164,7 +263,7 @@ export default function App() {
     setResult("Grantar Rider-roll...");
 
     try {
-      const res = await fetch(`${API_BASE}/api/v1/dev/roles/grant`, {
+      const grantRes = await fetch(`${API_BASE}/api/v1/dev/roles/grant`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -176,8 +275,20 @@ export default function App() {
         })
       });
 
-      const text = await res.text();
-      setResult(`Grant Rider status: ${res.status}\n\n${text || "OK"}\n\nKör OTP verify igen efter grant.`);
+      const grantText = await readText(grantRes);
+
+      if (!grantRes.ok) {
+        setResult(`Grant Rider status: ${grantRes.status}\n\n${grantText}`);
+        return;
+      }
+
+      const refreshed = await refreshRiderSession();
+
+      setResult(
+        `Grant Rider status: ${grantRes.status}\n\n${grantText}\n\n` +
+        `Rider session refresh OK\n\n` +
+        `Rider /me efter refresh:\n${JSON.stringify(refreshed.me, null, 2)}`
+      );
     } catch (err) {
       setResult(`ERROR: ${err.message}`);
     } finally {
@@ -191,13 +302,21 @@ export default function App() {
   async function createQuote() {
     setLoading(true);
     setResult("Creating quote...");
+    resetTripFlow();
 
     try {
+      const refreshed = await refreshRiderSession();
+
+      if (!Array.isArray(refreshed.me.roles) || !refreshed.me.roles.includes("RIDER")) {
+        setResult(`Rider saknar RIDER-roll efter refresh.\n\n${JSON.stringify(refreshed.me, null, 2)}`);
+        return;
+      }
+
       const res = await fetch(`${API_BASE}/api/v1/trips/quotes`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
+          Authorization: `Bearer ${refreshed.token}`
         },
         body: JSON.stringify({
           pickupLat: Number(pickupLat),
@@ -208,8 +327,14 @@ export default function App() {
         })
       });
 
-      const data = await res.json();
-      setQuoteToken(data.quoteToken ?? "");
+      const { data, text } = await readJsonSafe(res);
+
+      if (!res.ok) {
+        setResult(`Create quote failed\nStatus: ${res.status}\n\n${text}`);
+        return;
+      }
+
+      setQuoteToken(data?.quoteToken ?? "");
       setResult(`Quote OK\n\n${JSON.stringify(data, null, 2)}`);
     } catch (err) {
       setResult(`ERROR: ${err.message}`);
@@ -223,11 +348,23 @@ export default function App() {
     setResult("Creating trip...");
 
     try {
+      if (!quoteToken) {
+        setResult("QuoteToken saknas. Kör Create Quote först.");
+        return;
+      }
+
+      const refreshed = await refreshRiderSession();
+
+      if (!Array.isArray(refreshed.me.roles) || !refreshed.me.roles.includes("RIDER")) {
+        setResult(`Rider saknar RIDER-roll efter refresh.\n\n${JSON.stringify(refreshed.me, null, 2)}`);
+        return;
+      }
+
       const res = await fetch(`${API_BASE}/api/v1/trips`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
+          Authorization: `Bearer ${refreshed.token}`
         },
         body: JSON.stringify({
           pickupLat: Number(pickupLat),
@@ -239,19 +376,13 @@ export default function App() {
         })
       });
 
-      const text = await res.text();
-
-      let data = null;
-      if (text) {
-        try {
-          data = JSON.parse(text);
-        } catch {
-          data = null;
-        }
-      }
+      const { data, text } = await readJsonSafe(res);
 
       if (!res.ok) {
-        setResult(`Create trip failed\nStatus: ${res.status}\n\n${text}`);
+        setResult(
+          `Create trip failed\nStatus: ${res.status}\n\n${text}\n\n` +
+          `Rider /me just nu:\n${JSON.stringify(refreshed.me, null, 2)}`
+        );
         return;
       }
 
@@ -271,10 +402,22 @@ export default function App() {
     setResult("Requesting trip...");
 
     try {
+      if (!tripId) {
+        setResult("TripId saknas. Kör Create Trip först.");
+        return;
+      }
+
+      const refreshed = await refreshRiderSession();
+
+      if (!Array.isArray(refreshed.me.roles) || !refreshed.me.roles.includes("RIDER")) {
+        setResult(`Rider saknar RIDER-roll efter refresh.\n\n${JSON.stringify(refreshed.me, null, 2)}`);
+        return;
+      }
+
       const res = await fetch(`${API_BASE}/api/v1/trips/${tripId}/request`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${refreshed.token}`,
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
@@ -282,12 +425,17 @@ export default function App() {
         })
       });
 
-      const text = await res.text();
+      const text = await readText(res);
 
       if (!res.ok) {
         setResult(`Request trip failed\nStatus: ${res.status}\n\n${text}`);
         return;
       }
+
+      setActiveTrip({
+        tripId,
+        status: "Requested"
+      });
 
       setResult(`Trip requested\nStatus: ${res.status}\n\n${text || "Tomt svar från backend"}`);
     } catch (err) {
@@ -297,8 +445,48 @@ export default function App() {
     }
   }
 
+  async function getActiveTrip() {
+    setLoading(true);
+    setResult("Hämtar aktiv trip...");
+
+    try {
+      const refreshed = await refreshRiderSession();
+
+      if (!Array.isArray(refreshed.me.roles) || !refreshed.me.roles.includes("RIDER")) {
+        setResult(`Rider saknar RIDER-roll efter refresh.\n\n${JSON.stringify(refreshed.me, null, 2)}`);
+        return;
+      }
+
+      const res = await fetch(`${API_BASE}/api/v1/trips/active`, {
+        headers: {
+          Authorization: `Bearer ${refreshed.token}`
+        }
+      });
+
+      const { data, text } = await readJsonSafe(res);
+
+      if (res.status === 404) {
+        setActiveTrip(null);
+        setResult("Ingen aktiv trip för ridern just nu.");
+        return;
+      }
+
+      if (!res.ok) {
+        setResult(`Get active trip failed\nStatus: ${res.status}\n\n${text}`);
+        return;
+      }
+
+      setActiveTrip(data);
+      setResult(`Active trip status: ${res.status}\n\n${JSON.stringify(data, null, 2)}`);
+    } catch (err) {
+      setResult(`ERROR: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   // =========================
-  // DRIVER AUTH FUNCTIONS
+  // DRIVER AUTH
   // =========================
   async function driverOtpRequest() {
     setLoading(true);
@@ -311,7 +499,7 @@ export default function App() {
         body: JSON.stringify({ phone: driverPhone })
       });
 
-      const text = await res.text();
+      const text = await readText(res);
       setResult(`Driver OTP request status: ${res.status}\n\n${text}`);
     } catch (err) {
       setResult(`ERROR: ${err.message}`);
@@ -325,16 +513,11 @@ export default function App() {
     setResult("Verifierar Driver OTP...");
 
     try {
-      const res = await fetch(`${API_BASE}/api/v1/auth/otp/verify`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: driverPhone, code: driverCode })
-      });
-
-      const data = await res.json();
-      const newToken = data.access_token ?? "";
-      setDriverToken(newToken);
-      setResult(`Driver OTP verify status: ${res.status}\n\nDriver-token sparad.\n\nToken prefix: ${newToken.slice(0, 40)}...`);
+      const refreshed = await refreshDriverSession();
+      setResult(
+        `Driver OTP verify status: 200\n\n` +
+        `Driver-token sparad.\n\nToken prefix: ${refreshed.token.slice(0, 40)}...`
+      );
     } catch (err) {
       setResult(`ERROR: ${err.message}`);
     } finally {
@@ -348,21 +531,18 @@ export default function App() {
 
     try {
       const res = await fetch(`${API_BASE}/api/v1/me`, {
-        headers: {
-          Authorization: `Bearer ${driverToken}`
-        }
+        headers: { Authorization: `Bearer ${driverToken}` }
       });
 
-      const text = await res.text();
+      const { data, text } = await readJsonSafe(res);
 
-     try {
-      const parsed = JSON.parse(text);
-      setDriverMe(parsed);
-      setResult(`Driver GET /me status: ${res.status}\n\n${JSON.stringify(parsed, null, 2)}`);
-    } catch {
-      setDriverMe(null);
-      setResult(`Driver GET /me status: ${res.status}\n\n${text}`);
- }
+      if (data) {
+        setDriverMe(data);
+        setResult(`Driver GET /me status: ${res.status}\n\n${JSON.stringify(data, null, 2)}`);
+      } else {
+        setDriverMe(null);
+        setResult(`Driver GET /me status: ${res.status}\n\n${text}`);
+      }
     } catch (err) {
       setResult(`ERROR: ${err.message}`);
     } finally {
@@ -380,7 +560,7 @@ export default function App() {
     setResult("Grantar Driver-roll...");
 
     try {
-      const res = await fetch(`${API_BASE}/api/v1/dev/roles/grant`, {
+      const grantRes = await fetch(`${API_BASE}/api/v1/dev/roles/grant`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -392,8 +572,20 @@ export default function App() {
         })
       });
 
-      const text = await res.text();
-      setResult(`Grant Driver status: ${res.status}\n\n${text || "OK"}\n\nKör Driver OTP verify igen efter grant.`);
+      const grantText = await readText(grantRes);
+
+      if (!grantRes.ok) {
+        setResult(`Grant Driver status: ${grantRes.status}\n\n${grantText}`);
+        return;
+      }
+
+      const refreshed = await refreshDriverSession();
+
+      setResult(
+        `Grant Driver status: ${grantRes.status}\n\n${grantText}\n\n` +
+        `Driver session refresh OK\n\n` +
+        `Driver /me efter refresh:\n${JSON.stringify(refreshed.me, null, 2)}`
+      );
     } catch (err) {
       setResult(`ERROR: ${err.message}`);
     } finally {
@@ -409,18 +601,25 @@ export default function App() {
     setResult("Sätter driver online...");
 
     try {
+      const refreshed = await refreshDriverSession();
+
+      if (!Array.isArray(refreshed.me.roles) || !refreshed.me.roles.includes("DRIVER")) {
+        setResult(`Driver saknar DRIVER-roll efter refresh.\n\n${JSON.stringify(refreshed.me, null, 2)}`);
+        return;
+      }
+
       const res = await fetch(`${API_BASE}/api/v1/driver/me/availability`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${driverToken}`
+          Authorization: `Bearer ${refreshed.token}`
         },
         body: JSON.stringify({
           isOnline: true
         })
       });
 
-      const text = await res.text();
+      const text = await readText(res);
       setResult(`Driver online status: ${res.status}\n\n${text || "OK"}`);
     } catch (err) {
       setResult(`ERROR: ${err.message}`);
@@ -434,11 +633,18 @@ export default function App() {
     setResult("Skickar driver location...");
 
     try {
+      const refreshed = await refreshDriverSession();
+
+      if (!Array.isArray(refreshed.me.roles) || !refreshed.me.roles.includes("DRIVER")) {
+        setResult(`Driver saknar DRIVER-roll efter refresh.\n\n${JSON.stringify(refreshed.me, null, 2)}`);
+        return;
+      }
+
       const res = await fetch(`${API_BASE}/api/v1/driver/location`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${driverToken}`
+          Authorization: `Bearer ${refreshed.token}`
         },
         body: JSON.stringify({
           lat: Number(driverLat),
@@ -446,7 +652,7 @@ export default function App() {
         })
       });
 
-      const text = await res.text();
+      const text = await readText(res);
       setResult(`Driver location status: ${res.status}\n\n${text || "OK"}`);
     } catch (err) {
       setResult(`ERROR: ${err.message}`);
@@ -460,25 +666,26 @@ export default function App() {
     setResult("Hämtar driver offers...");
 
     try {
+      const refreshed = await refreshDriverSession();
+
+      if (!Array.isArray(refreshed.me.roles) || !refreshed.me.roles.includes("DRIVER")) {
+        setResult(`Driver saknar DRIVER-roll efter refresh.\n\n${JSON.stringify(refreshed.me, null, 2)}`);
+        return;
+      }
+
       const res = await fetch(`${API_BASE}/api/v1/dispatch/offers`, {
         headers: {
-          Authorization: `Bearer ${driverToken}`
+          Authorization: `Bearer ${refreshed.token}`
         }
       });
 
-      const text = await res.text();
+      const { data, text } = await readJsonSafe(res);
+      const list = Array.isArray(data) ? data : [];
 
-      let data = [];
-      try {
-        data = JSON.parse(text);
-      } catch {
-        data = [];
-      }
+      setOffers(list);
 
-      setOffers(Array.isArray(data) ? data : []);
-
-      if (Array.isArray(data) && data.length > 0) {
-        setSelectedOfferId(data[0].offerId ?? data[0].id ?? "");
+      if (list.length > 0) {
+        setSelectedOfferId(list[0].offerId ?? list[0].id ?? "");
       }
 
       setResult(`Get offers status: ${res.status}\n\n${text}`);
@@ -489,30 +696,42 @@ export default function App() {
     }
   }
 
-     async function acceptOffer() {
-     setLoading(true);
-     setResult("Accepterar offer...");
+  async function acceptOffer() {
+    setLoading(true);
+    setResult("Accepterar offer...");
 
-   try {
-     const res = await fetch(`${API_BASE}/api/v1/dispatch/offers/accept`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${driverToken}`
-      },
-      body: JSON.stringify({
-        offerId: selectedOfferId
-      })
-    });
+    try {
+      if (!selectedOfferId) {
+        setResult("OfferId saknas. Kör Get Offers först.");
+        return;
+      }
 
-    const text = await res.text();
-    setResult(`Accept offer status: ${res.status}\n\n${text || "OK"}`);
-  } catch (err) {
-    setResult(`ERROR: ${err.message}`);
-  } finally {
-    setLoading(false);
+      const refreshed = await refreshDriverSession();
+
+      if (!Array.isArray(refreshed.me.roles) || !refreshed.me.roles.includes("DRIVER")) {
+        setResult(`Driver saknar DRIVER-roll efter refresh.\n\n${JSON.stringify(refreshed.me, null, 2)}`);
+        return;
+      }
+
+      const res = await fetch(`${API_BASE}/api/v1/dispatch/offers/accept`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${refreshed.token}`
+        },
+        body: JSON.stringify({
+          offerId: selectedOfferId
+        })
+      });
+
+      const text = await readText(res);
+      setResult(`Accept offer status: ${res.status}\n\n${text || "OK"}`);
+    } catch (err) {
+      setResult(`ERROR: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
   }
-}
 
   return (
     <div
@@ -549,23 +768,25 @@ export default function App() {
             minHeight: 0
           }}
         >
-          {/* RIDER */}
           <section style={panelStyle}>
             <h2 style={{ marginTop: 0 }}>Rider</h2>
 
+            <div style={{ marginBottom: 10 }}>
+              <span style={badgeStyle(riderHasRole)}>RIDER</span>
+            </div>
+
+            <div style={statusBoxStyle}>
+              <div><strong>Rider status</strong></div>
+              <div style={hintStyle(!!token)}>Token: {token ? "OK" : "Saknas"}</div>
+              <div style={hintStyle(riderHasRole)}>Role: {riderHasRole ? "RIDER aktiv" : "RIDER saknas i aktiv session"}</div>
+              <div style={hintStyle(!!quoteToken)}>Quote: {quoteToken ? "Finns" : "Saknas"}</div>
+              <div style={hintStyle(!!tripId)}>Trip: {tripId ? "Finns" : "Saknas"}</div>
+              <div style={hintStyle(!!activeTrip)}>Active Trip: {activeTrip ? "Finns" : "Ingen laddad"}</div>
+            </div>
+
             <div style={{ display: "grid", gap: 10 }}>
-              <input
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="Rider Telefon"
-                style={inputStyle}
-              />
-              <input
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                placeholder="Rider OTP"
-                style={inputStyle}
-              />
+              <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Rider Telefon" style={inputStyle} />
+              <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Rider OTP" style={inputStyle} />
             </div>
 
             <div style={buttonRowStyle}>
@@ -573,35 +794,16 @@ export default function App() {
               <button onClick={otpVerify} disabled={loading}>OTP verify</button>
               <button onClick={loadMe} disabled={!token || loading}>Load /me</button>
               <button onClick={grantRiderRole} disabled={!me?.userId || loading}>Grant Rider</button>
+              <button onClick={getActiveTrip} disabled={!token || loading}>Get Active Trip</button>
             </div>
 
             <h3 style={{ marginTop: 24 }}>Trip</h3>
 
             <div style={{ display: "grid", gap: 10 }}>
-              <input
-                value={pickupLat}
-                onChange={(e) => setPickupLat(e.target.value)}
-                placeholder="Pickup Lat"
-                style={inputStyle}
-              />
-              <input
-                value={pickupLng}
-                onChange={(e) => setPickupLng(e.target.value)}
-                placeholder="Pickup Lng"
-                style={inputStyle}
-              />
-              <input
-                value={dropoffLat}
-                onChange={(e) => setDropoffLat(e.target.value)}
-                placeholder="Dropoff Lat"
-                style={inputStyle}
-              />
-              <input
-                value={dropoffLng}
-                onChange={(e) => setDropoffLng(e.target.value)}
-                placeholder="Dropoff Lng"
-                style={inputStyle}
-              />
+              <input value={pickupLat} onChange={(e) => setPickupLat(e.target.value)} placeholder="Pickup Lat" style={inputStyle} />
+              <input value={pickupLng} onChange={(e) => setPickupLng(e.target.value)} placeholder="Pickup Lng" style={inputStyle} />
+              <input value={dropoffLat} onChange={(e) => setDropoffLat(e.target.value)} placeholder="Dropoff Lat" style={inputStyle} />
+              <input value={dropoffLng} onChange={(e) => setDropoffLng(e.target.value)} placeholder="Dropoff Lng" style={inputStyle} />
             </div>
 
             <div style={buttonRowStyle}>
@@ -620,25 +822,31 @@ export default function App() {
 
             <h4>TripId</h4>
             <pre style={preStyle}>{tripId || "Ingen trip ännu"}</pre>
+
+            <h4>Active Trip</h4>
+            <pre style={preStyle}>
+              {activeTrip ? JSON.stringify(activeTrip, null, 2) : "Ingen aktiv trip laddad"}
+            </pre>
           </section>
 
-          {/* DRIVER */}
           <section style={panelStyle}>
             <h2 style={{ marginTop: 0 }}>Driver</h2>
 
+            <div style={{ marginBottom: 10 }}>
+              <span style={badgeStyle(driverHasRole)}>DRIVER</span>
+            </div>
+
+            <div style={statusBoxStyle}>
+              <div><strong>Driver status</strong></div>
+              <div style={hintStyle(!!driverToken)}>Token: {driverToken ? "OK" : "Saknas"}</div>
+              <div style={hintStyle(driverHasRole)}>Role: {driverHasRole ? "DRIVER aktiv" : "DRIVER saknas i aktiv session"}</div>
+              <div style={hintStyle(offers.length > 0)}>Offers: {offers.length > 0 ? `${offers.length} st` : "Inga"}</div>
+              <div style={hintStyle(!!selectedOfferId)}>Selected offer: {selectedOfferId ? "Vald" : "Ingen vald"}</div>
+            </div>
+
             <div style={{ display: "grid", gap: 10 }}>
-              <input
-                value={driverPhone}
-                onChange={(e) => setDriverPhone(e.target.value)}
-                placeholder="Driver Telefon"
-                style={inputStyle}
-              />
-              <input
-                value={driverCode}
-                onChange={(e) => setDriverCode(e.target.value)}
-                placeholder="Driver OTP"
-                style={inputStyle}
-              />
+              <input value={driverPhone} onChange={(e) => setDriverPhone(e.target.value)} placeholder="Driver Telefon" style={inputStyle} />
+              <input value={driverCode} onChange={(e) => setDriverCode(e.target.value)} placeholder="Driver OTP" style={inputStyle} />
             </div>
 
             <div style={buttonRowStyle}>
@@ -651,18 +859,8 @@ export default function App() {
             <h3 style={{ marginTop: 24 }}>Driver actions</h3>
 
             <div style={{ display: "grid", gap: 10 }}>
-              <input
-                value={driverLat}
-                onChange={(e) => setDriverLat(e.target.value)}
-                placeholder="Driver Lat"
-                style={inputStyle}
-              />
-              <input
-                value={driverLng}
-                onChange={(e) => setDriverLng(e.target.value)}
-                placeholder="Driver Lng"
-                style={inputStyle}
-              />
+              <input value={driverLat} onChange={(e) => setDriverLat(e.target.value)} placeholder="Driver Lat" style={inputStyle} />
+              <input value={driverLng} onChange={(e) => setDriverLng(e.target.value)} placeholder="Driver Lng" style={inputStyle} />
             </div>
 
             <div style={buttonRowStyle}>

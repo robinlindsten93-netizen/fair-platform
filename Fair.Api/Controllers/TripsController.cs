@@ -5,6 +5,7 @@ using Fair.Application.Trips.CompleteTrip;
 using Fair.Application.Trips.CreateTrip;
 using Fair.Application.Trips.RequestTrip;
 using Fair.Application.Trips.StartTrip;
+using Fair.Application.Trips.Queries.Active;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
@@ -87,6 +88,10 @@ public sealed class TripsController : ControllerBase
         catch (InvalidOperationException ex) when (ex.Message == "concurrency_conflict")
         {
             return BadRequest(new { error = "concurrency_conflict" });
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "rider_already_has_active_trip")
+        {
+            return Conflict(new { error = "rider_already_has_active_trip" });
         }
     }
 
@@ -192,6 +197,19 @@ public sealed class TripsController : ControllerBase
             return BadRequest(new { error = ex.Message });
         }
     }
+
+        [HttpGet("active")]
+        [Authorize(Policy = "Rider")]
+        public async Task<IActionResult> GetActive(
+       [FromServices] GetMyActiveTrip handler,
+        CancellationToken ct)
+{
+        var result = await handler.Handle(User, ct);
+        if (result is null)
+        return NotFound(new { error = "no_active_trip" });
+
+    return Ok(result);
+}
 
     [HttpGet("{tripId:guid}")]
     public async Task<IActionResult> GetById(
